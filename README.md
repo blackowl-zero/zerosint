@@ -1,6 +1,16 @@
-# zerosint
+<p align="center">
+  <img src="https://repository-images.githubusercontent.com/1429660160/2032960f-9c28-442e-8bcc-bd6fb687db1b" alt="zerosint banner" width="100%">
+</p>
 
-A vibe coded OSINT tool that helps you manage your most common OSINT scans.
+<p align="center">
+  <em>A vibe coded OSINT tool that helps you manage your most common OSINT scans.</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.x-00b8d4?style=for-the-badge&logo=python&logoColor=00e5ff&labelColor=0d1117" alt="Python">
+  <img src="https://img.shields.io/badge/OSINT-passive-00b8d4?style=for-the-badge&logo=gnuprivacyguard&logoColor=00e5ff&labelColor=0d1117" alt="Passive OSINT">
+  <img src="https://img.shields.io/badge/platform-linux-00b8d4?style=for-the-badge&logo=linux&logoColor=00e5ff&labelColor=0d1117" alt="Linux">
+</p>
 
 <p align="center">
   <img src="assets/menu.png" alt="ZeroSint interactive menu" width="720">
