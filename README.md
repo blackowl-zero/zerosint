@@ -2,6 +2,10 @@
 
 A vibe coded OSINT tool that helps you manage your most common OSINT scans.
 
+<p align="center">
+  <img src="assets/menu.png" alt="ZeroSint interactive menu" width="720">
+</p>
+
 You give it whatever you've got (a username, an email, a domain, a phone number) and it runs the usual OSINT tools for you, pivots on what it finds, and ties everything into one scored report instead of leaving you with four separate tool outputs to read through.
 
 It wraps tools you probably already use: Maigret, theHarvester, recon-ng, SpiderFoot, and adds a free breach check on top. If one of those isn't installed, zerosint just skips it and keeps going.
@@ -57,6 +61,20 @@ recon-cli -C "marketplace install recon/domains-hosts/hackertarget"
 On Windows, run everything inside WSL (Kali works fine). recon-ng and SpiderFoot don't behave on native Windows.
 
 ## Usage
+
+### Interactive menu
+
+The easiest way in. Pick a scan, type your target, and the menu runs everything for you:
+
+```bash
+python menu.py
+```
+
+From there you can run a quick email scan, a full scan, a password check, reopen your last results or the HTML report, change settings (like pivot depth) and run the tests.
+
+### Command line
+
+If you prefer flags, or want to script it:
 
 ```bash
 # username + email
