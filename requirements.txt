@@ -1,0 +1,12 @@
+# Core (required to run the tool)
+requests>=2.31
+
+# Optional: improve the tool but are not required
+python-dotenv>=1.0     # loads API keys from .env
+pyvis>=0.3             # interactive graph in the HTML report (falls back to text if missing)
+rich>=13               # terminal UI (falls back to plain output if missing)
+
+# The external OSINT tools are NOT pip deps here; they run as external
+# binaries (see README / docker-compose). To install them:
+#   pip install maigret theHarvester
+#   recon-ng, spiderfoot: git clone + their own setup (or Docker)

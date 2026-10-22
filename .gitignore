@@ -1,0 +1,20 @@
+.env
+*.db
+osint_report.html
+osint_findings.json
+zerosint_report.html
+*findings.json
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+venv/
+maigret_*/
+harvest_*
+
+# external tool binaries (install them on PATH, do not commit)
+/phoneinfoga
+/phoneinfoga.exe
+*.exe
+/bin/
