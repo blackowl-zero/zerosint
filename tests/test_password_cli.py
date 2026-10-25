@@ -47,6 +47,10 @@ class PasswordCliTest(unittest.TestCase):
             ["--check-password", secret, "--plain"],
             ["--plain", "--check-password", "-" + secret],
             ["--check-password", "--plain", secret],
+            ["--check-pasword", "-" + secret],             # typo in the flag name
+            ["--chek-password", secret],
+            ["--plain", secret],                           # stray value, no flag at all
+            ["-v" + secret],                               # glued to another flag
         ]
         for argv in forms:
             with self.subTest(argv=argv):
