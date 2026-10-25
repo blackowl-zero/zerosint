@@ -78,6 +78,33 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(Finding(type="breach", value="Adobe").key, "breach:adobe")
 
 
+class DerivedUsernameTest(unittest.TestCase):
+    """--email bob@acme.io also seeds the derived username 'bob'. A breach found for
+    'bob' is the same person's exposure as one found for bob@acme.io: one row."""
+
+    def _breaches(self, raw: dict):
+        from core.normalizer import normalize
+
+        class BreachBoth(FakeBreachModule):
+            accepts = {"email", "username"}
+
+        t = Target(label="t")
+        t.seeds = normalize(raw)
+        results = Orchestrator([BreachBoth("hibp")], max_depth=2).run(t)
+        return [f for f in results.values() if f.type == "breach"]
+
+    def test_breach_via_derived_username_merges_into_email_row(self):
+        rows = self._breaches({"email": "bob@acme.io"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].meta["account"], "bob@acme.io")
+        self.assertEqual(rows[0].meta.get("also_via_username"), ["bob"])
+
+    def test_breach_for_explicit_username_stays_separate(self):
+        # the user typed both: they are separate accounts, keep both rows
+        rows = self._breaches({"email": "bob@acme.io", "username": "bob"})
+        self.assertEqual({r.meta["account"] for r in rows}, {"bob@acme.io", "bob"})
+
+
 class EmitModule:
     """For an email seed, reports whatever domains it was given (like SpiderFoot)."""
 
