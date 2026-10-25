@@ -32,6 +32,7 @@ class Orchestrator:
         self.results: dict[str, Finding] = {}   # key -> Finding (deduped)
         self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id), unique
         self._edge_set: set[tuple[str, str]] = set()
+        self.interrupted = False  # True after a Ctrl+C inside run()
 
     def _notify(self, event: str, *args) -> None:
         """Notify the UI. A UI error must never break the scan."""
@@ -72,6 +73,21 @@ class Orchestrator:
             log.warning("Modules not available (graceful degrade): %s", ", ".join(skipped))
         log.info("Active modules: %s", ", ".join(m.name for m in available) or "none")
 
+        try:
+            processed = self._pivot(queue, available)
+        except KeyboardInterrupt:
+            # Ctrl+C: stop pivoting, keep everything found so far
+            self.interrupted = True
+            found = sum(1 for f in self.results.values() if f.source != "input")
+            log.warning("Scan interrupted, keeping %d findings found so far.", found)
+            return self.results
+
+        log.info("Pivot done. processed_seeds=%d total_findings=%d",
+                 processed, len(self.results))
+        return self.results
+
+    def _pivot(self, queue: deque[Finding], available: list[BaseModule]) -> int:
+        """The pivot loop. Returns the number of processed seeds."""
         processed = 0
         while queue:
             if len(self.results) >= self.max_findings:
@@ -105,7 +121,4 @@ class Orchestrator:
                     if is_new and f.depth < self.max_depth:
                         queue.append(f)
             processed += 1
-
-        log.info("Pivot done. processed_seeds=%d total_findings=%d",
-                 processed, len(self.results))
-        return self.results
+        return processed

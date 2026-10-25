@@ -92,12 +92,16 @@ def run_scan(inputs: dict[str, str]) -> None:
     if settings["plain"]:
         cmd.append("--plain")
     say("Running: " + " ".join(cmd[1:]), "grey50")
-    try:
-        rc = subprocess.run(cmd, cwd=HERE).returncode
-    except KeyboardInterrupt:
-        say("\nInterrupted.", "yellow")
-        return
-    if rc == 0 and os.path.exists(REPORT) and confirm("Open the HTML report?", False):
+    # Ctrl+C reaches main.py too (same terminal), which then saves a partial
+    # report. Wait for it instead of killing it (subprocess.run would kill it).
+    proc = subprocess.Popen(cmd, cwd=HERE)
+    while True:
+        try:
+            rc = proc.wait()
+            break
+        except KeyboardInterrupt:
+            say("\nInterrupted, waiting for the partial report...", "yellow")
+    if rc in (0, 130) and os.path.exists(REPORT) and confirm("Open the HTML report?", False):
         open_report()
 
 

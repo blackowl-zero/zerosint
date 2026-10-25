@@ -158,28 +158,35 @@ def main() -> int:
         results = orch.run(target)
     results = correlate(results)
     summary = summarize(results)
+    partial = orch.interrupted  # Ctrl+C: save what we have, marked as partial
 
     # persist
     store = Storage(args.db)
-    scan_id = store.new_scan(label)
+    scan_id = store.new_scan(f"{label} (partial)" if partial else label)
     store.save(scan_id, results, orch.edges)
     store.close()
 
     # reports
     html_report.export_json(results, args.json)
-    html_report.export_html(results, orch.edges, summary, label, args.output)
+    html_report.export_html(results, orch.edges, summary, label, args.output,
+                            interrupted=partial)
+    rc = 130 if partial else 0  # 130 = the usual exit code after Ctrl+C
 
+    shown = False
     if ui is not None:
         try:
             ui.summary(results, summary, label, {
                 "Report": args.output, "JSON": args.json,
                 "DB": f"{args.db} (scan #{scan_id})",
             })
-            return 0
+            shown = True
         except Exception as e:  # noqa: BLE001 - UI error -> plain summary
             logging.warning("Rich summary failed (%s), falling back to plain.", e)
-    _print_plain_summary(label, summary, args, scan_id)
-    return 0
+    if not shown:
+        _print_plain_summary(label, summary, args, scan_id)
+    if partial:
+        print(f"Scan interrupted. Partial report saved: {args.output}")
+    return rc
 
 
 def _print_plain_summary(label: str, summary: dict, args, scan_id) -> None:

@@ -82,7 +82,9 @@ printf '%s' "$PW" | python main.py --check-password
 
 `--check-password "mypassword"` (the old form) is refused with a short explanation, because the password would end up in your shell history and in `ps`.
 
-You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run.
+You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run. The HTML report is a single file that works offline, with nothing next to it.
+
+Pressing Ctrl+C during a scan doesn't throw the work away. zerosint stops pivoting, writes the report, JSON and db entry with everything found so far (marked as partial), and exits with code 130. This works from the menu too.
 
 ## Scope
 
