@@ -68,6 +68,39 @@ class PasswordCliTest(unittest.TestCase):
             self.assertNotIn(secret, p.stdout + p.stderr)
             self.assertEqual(os.listdir(d), [])  # no report, json or db written
 
+    @unittest.skipUnless(hasattr(os, "fork"), "needs a POSIX pty")
+    def test_ctrl_c_at_prompt_exits_cleanly(self):
+        """Real terminal: Ctrl+C at the hidden prompt -> short message, exit 130, no traceback."""
+        import pty
+        import select
+        import time
+        pid, fd = pty.fork()
+        if pid == 0:  # child: the real CLI on a real tty
+            os.chdir(ROOT)
+            os.execv(sys.executable, [sys.executable, "main.py", "--check-password", "--plain"])
+        out = b""
+        deadline = time.monotonic() + 30
+        while b"Password" not in out and time.monotonic() < deadline:
+            if select.select([fd], [], [], 0.5)[0]:
+                out += os.read(fd, 1024)
+        os.write(fd, b"\x03")  # the terminal turns this into SIGINT
+        while time.monotonic() < deadline:
+            if not select.select([fd], [], [], 0.5)[0]:
+                continue
+            try:
+                chunk = os.read(fd, 1024)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+        _, status = os.waitpid(pid, 0)
+        text = out.decode(errors="replace")
+        self.assertIn("Password", text)
+        self.assertNotIn("Traceback", text)
+        self.assertIn("Cancelled.", text)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 130)
+
     def test_reads_from_pipe(self):
         self.assertEqual(main.read_password(io.StringIO("s3cret\n")), "s3cret")
 
