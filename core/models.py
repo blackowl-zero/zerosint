@@ -58,8 +58,16 @@ class Finding:
 
     @property
     def key(self) -> str:
-        """Unique dedup key: type + normalized value."""
-        return f"{self.type}:{self.value.strip().lower()}"
+        """Unique dedup key: type + normalized value.
+
+        A breach is per account: "Adobe" for a@x and "Adobe" for b@x are two
+        separate exposures, so the account is part of the key.
+        """
+        base = f"{self.type}:{self.value.strip().lower()}"
+        account = self.meta.get("account") if self.type == EntityType.BREACH.value else None
+        if account:
+            return f"{base}#{str(account).strip().lower()}"
+        return base
 
     @property
     def node_id(self) -> str:

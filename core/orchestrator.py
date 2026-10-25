@@ -30,7 +30,8 @@ class Orchestrator:
         self.max_depth = max_depth
         self.max_findings = max_findings
         self.results: dict[str, Finding] = {}   # key -> Finding (deduped)
-        self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id)
+        self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id), unique
+        self._edge_set: set[tuple[str, str]] = set()
 
     def _notify(self, event: str, *args) -> None:
         """Notify the UI. A UI error must never break the scan."""
@@ -97,7 +98,10 @@ class Orchestrator:
                     self._notify("finding", f)
                     is_new = self._store(f)
                     # edge for the graph (parent seed -> finding)
-                    self.edges.append((seed.node_id, f.node_id))
+                    edge = (seed.node_id, f.node_id)
+                    if edge not in self._edge_set:
+                        self._edge_set.add(edge)
+                        self.edges.append(edge)
                     if is_new and f.depth < self.max_depth:
                         queue.append(f)
             processed += 1
