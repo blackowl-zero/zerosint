@@ -73,6 +73,11 @@ class _Parser(argparse.ArgumentParser):
         if _mentions_check_password(sys.argv[1:]):
             self.exit(2, f"{self.prog}: error: invalid arguments for --check-password "
                          "(not shown, they may contain a password).\n" + OLD_PW_USAGE + "\n")
+        # these messages repeat raw argv, which may be a password typed by
+        # mistake (e.g. a misspelled --check-pasword): never echo it
+        if message.startswith("unrecognized arguments") or "ignored explicit argument" in message:
+            message = ("unrecognized or misplaced arguments (not shown, they may contain "
+                       "a password); run with -h for usage")
         super().error(message)
 
 
