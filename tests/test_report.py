@@ -6,6 +6,7 @@ Offline tests for the HTML report: self-contained graph and safe links.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -66,6 +67,21 @@ class ReportTest(unittest.TestCase):
 
     def test_single_html_document(self):
         self.assertEqual(_render().count("<html"), 1)
+
+    @unittest.skipUnless(HAVE_PYVIS, "pyvis not installed")
+    def test_graph_labels_are_drawn_when_fitted(self):
+        """vis-network hides a label when font size x zoom < drawThreshold. Measured in
+        Chrome: this layout fits 6 nodes at zoom ~0.8 and 60 nodes at ~0.26, so
+        size 18 / threshold 3 draws every label (60 nodes: 18*0.26 = 4.7 >= 3)."""
+        results, edges = _results()
+        graph = html_report._build_graph_html(results, edges)
+        nodes = json.loads(re.search(r"nodes = new vis\.DataSet\((\[.*?\])\);", graph).group(1))
+        for n in nodes:
+            self.assertEqual(n["font"]["size"], 18)
+            self.assertEqual(n["scaling"]["label"]["drawThreshold"], 3)
+        options = json.loads(re.search(r"var options = (\{.*?\});\s", graph, re.S).group(1))
+        bh = options["physics"]["barnesHut"]
+        self.assertEqual((bh["gravitationalConstant"], bh["springLength"]), (-3000, 120))
 
     @unittest.skipUnless(HAVE_PYVIS, "pyvis not installed")
     def test_graph_iframe_sandboxed_with_scripts_only(self):
