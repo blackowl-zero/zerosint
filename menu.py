@@ -184,7 +184,8 @@ def open_report() -> None:
 
 
 def run_tests() -> None:
-    subprocess.run([sys.executable, os.path.join(HERE, "tests", "test_xposed_mod.py")], cwd=HERE)
+    subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_*.py", "-v"], cwd=HERE)
 
 
 def change_settings() -> None:

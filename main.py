@@ -66,7 +66,8 @@ def main() -> int:
     ap.add_argument("--domain")
     ap.add_argument("--ip")
     ap.add_argument("--org")
-    ap.add_argument("--depth", type=int, default=2, help="max pivot depth (default 2)")
+    ap.add_argument("--depth", type=int, default=2, choices=range(1, 6), metavar="1-5",
+                    help="max pivot depth 1-5 (default 2)")
     ap.add_argument("-o", "--output", default="zerosint_report.html")
     ap.add_argument("--json", default="zerosint_findings.json")
     ap.add_argument("--db", default="zerosint.db")
