@@ -57,6 +57,12 @@ class Orchestrator:
             srcs = existing.meta.setdefault("all_sources", [existing.source])
             if f.source not in srcs:
                 srcs.append(f.source)
+            via = existing.meta.setdefault("also_via_username", [])
+            for u in f.meta.get("also_via_username", []):
+                if u not in via:
+                    via.append(u)
+            if not via:
+                del existing.meta["also_via_username"]
             return False
         f.meta.setdefault("all_sources", [f.source])
         self.results[f.key] = f
@@ -75,6 +81,15 @@ class Orchestrator:
             log.info("Not scanning webmail domain %s (from %s)", f.value,
                      f.meta.get("derived_from") or f.parent or f.source)
         return True
+
+    @staticmethod
+    def _attribute_to_email(seed: Finding, f: Finding) -> None:
+        """A username derived from an email (bob from bob@acme.io) is not a separate
+        account the user gave us: a breach found for it belongs to the email row."""
+        if (f.type == "breach" and seed.source == "input:derived" and seed.parent
+                and f.meta.get("account") == seed.value):
+            f.meta["account"] = seed.parent
+            f.meta["also_via_username"] = [seed.value]
 
     def run(self, target: Target) -> dict[str, Finding]:
         queue: deque[Finding] = deque()
@@ -137,6 +152,7 @@ class Orchestrator:
                 for f in found:
                     if self._is_unrequested_webmail(f):
                         continue
+                    self._attribute_to_email(seed, f)
                     self._notify("finding", f)
                     is_new = self._store(f)
                     # edge for the graph (parent seed -> finding)

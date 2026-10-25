@@ -26,6 +26,12 @@ class NormalizerTest(unittest.TestCase):
         dom = [s for s in normalize({"email": "x@acme.io"}) if s.type == "domain"]
         self.assertEqual(dom[0].meta.get("derived_from"), "x@acme.io")
 
+    def test_explicit_username_wins_over_derived(self):
+        users = [s for s in normalize({"email": "bob@acme.io", "username": "bob"})
+                 if s.type == "username"]
+        self.assertEqual([(u.source, u.parent, u.confidence) for u in users],
+                         [("input", None, 1.0)])
+
     def test_explicit_domain_clears_derived_mark(self):
         dom = [s for s in normalize({"email": "x@gmail.com", "domain": "gmail.com"})
                if s.type == "domain"]

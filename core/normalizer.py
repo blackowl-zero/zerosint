@@ -65,6 +65,8 @@ def normalize(raw_inputs: dict[str, str]) -> list[Finding]:
                 for s in seeds:
                     if s.key == f.key:
                         s.meta.pop("derived_from", None)
+                        if s.source == "input:derived":  # e.g. --username bob after --email bob@x
+                            s.source, s.parent, s.confidence = "input", None, 1.0
             return
         seen.add(f.key)
         seeds.append(f)
