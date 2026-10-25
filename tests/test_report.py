@@ -67,6 +67,13 @@ class ReportTest(unittest.TestCase):
     def test_single_html_document(self):
         self.assertEqual(_render().count("<html"), 1)
 
+    @unittest.skipUnless(HAVE_PYVIS, "pyvis not installed")
+    def test_graph_iframe_sandboxed_with_scripts_only(self):
+        """The graph runs scripts, nothing else: no same-origin, forms, popups or top navigation."""
+        tags = re.findall(r"<iframe\b[^>]*>", _render())
+        self.assertEqual(len(tags), 1)
+        self.assertRegex(tags[0], r'\ssandbox="allow-scripts"')
+
     def test_javascript_url_not_linked(self):
         doc = _render("javascript:alert(1)")
         self.assertNotIn('href="javascript', doc)
