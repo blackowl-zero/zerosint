@@ -57,6 +57,13 @@ class ReportTest(unittest.TestCase):
         self.assertNotIn("node_modules", graph)
         self.assertIn("new vis.Network", graph)
 
+    @unittest.skipUnless(HAVE_PYVIS, "pyvis not installed")
+    def test_graph_document_has_no_white_frame(self):
+        results, edges = _results()
+        graph = html_report._build_graph_html(results, edges)
+        self.assertRegex(graph, r"body\s*\{[^}]*margin:\s*0")
+        self.assertRegex(graph, r"body\s*\{[^}]*background:\s*#0f172a")
+
     def test_single_html_document(self):
         self.assertEqual(_render().count("<html"), 1)
 

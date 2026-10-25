@@ -79,7 +79,11 @@ def _build_graph_html(results: dict[str, Finding],
     try:
         doc = net.generate_html(notebook=False)
         doc = _HTML_COMMENT_RE.sub("", doc)
-        return _BOOTSTRAP_RE.sub("", doc)
+        doc = _BOOTSTRAP_RE.sub("", doc)
+        # inside the iframe: no default white margin, no extra border/scrollbar
+        frame_css = ("<style>html, body { margin: 0; background: #0f172a; overflow: hidden; }"
+                     " #mynetwork { border: 0 !important; }</style>")
+        return doc.replace("</head>", frame_css + "</head>", 1)
     except Exception as e:  # noqa: BLE001
         log.warning("graph gen failed: %s", e)
         return "<p>graph unavailable</p>"
@@ -154,7 +158,7 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
     if graph_html.lstrip().lower().startswith("<html"):
         # pyvis gives a whole document; nest it in an iframe, not in our <body>
         graph_html = ('<iframe class="graph" title="Relationship graph" '
-                      'style="width:100%;height:620px;border:0;display:block" '
+                      'style="width:100%;height:600px;border:0;display:block" '
                       f'srcdoc="{html.escape(graph_html, quote=True)}"></iframe>')
 
     by_type = ", ".join(f"{k}: {v}" for k, v in summary["by_type"].items()) or "none"
