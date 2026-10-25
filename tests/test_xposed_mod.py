@@ -124,6 +124,13 @@ class XposedModuleTest(unittest.TestCase):
         with mock.patch(GET, return_value=_resp(200, bad_json=True)):
             self.assertEqual(self.mod.run(self.seed), [])
 
+    def test_email_is_url_encoded(self):
+        # "#" would otherwise cut the URL into a fragment; "@" stays as the API expects
+        seed = Finding(type=EntityType.EMAIL, value="a#b+c@x.com", depth=0)
+        with mock.patch(GET, return_value=_resp(404, NOT_FOUND)) as get:
+            self.mod.run(seed)
+        self.assertTrue(get.call_args.args[0].endswith("/check-email/a%23b%2Bc@x.com"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
