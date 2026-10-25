@@ -23,6 +23,12 @@ from core.models import EntityType, Finding
 log = logging.getLogger("osint")
 
 TIER_COLOR = {"high": "#4ade80", "medium": "#fbbf24", "low": "#94a3b8"}
+
+# graph layout / labels (see _build_graph_html)
+GRAPH_GRAVITY = -3000
+GRAPH_SPRING_LENGTH = 120
+GRAPH_FONT_SIZE = 18
+LABEL_DRAW_THRESHOLD = 3
 TYPE_COLOR = {
     EntityType.EMAIL: "#60a5fa", EntityType.USERNAME: "#c084fc",
     EntityType.DOMAIN: "#34d399", EntityType.IP: "#f87171",
@@ -82,14 +88,23 @@ def _build_graph_html(results: dict[str, Finding],
         return "<pre>" + html.escape("\n".join(lines)) + "</pre>"
 
     # in_line: vis-network JS/CSS go inside the file, no lib/ folder needed
+    # no font_color here: pyvis would then replace each node's font dict
+    # (dropping its size); the color is set per node below
     net = Network(height="600px", width="100%", bgcolor="#0f172a",
-                  font_color="#e2e8f0", directed=True, cdn_resources="in_line")
-    net.barnes_hut()
+                  directed=True, cdn_resources="in_line")
+    # vis-network hides a label once font size x zoom < drawThreshold. pyvis's
+    # default physics (gravity -80000, springs 250) spreads nodes so far that
+    # the fitted zoom is ~0.25 and every label disappeared. A tighter layout,
+    # bigger font and lower threshold keep labels drawn (measured in Chrome:
+    # 6 nodes fit at ~0.8, 60 nodes at ~0.26).
+    net.barnes_hut(gravity=GRAPH_GRAVITY, spring_length=GRAPH_SPRING_LENGTH)
     for f in results.values():
         color = TYPE_COLOR.get(f.type, "#94a3b8")
         label = f.value if len(f.value) <= 30 else f.value[:27] + "..."
         title = f"{f.type} | conf={f.confidence} | src={f.meta.get('all_sources')}"
-        net.add_node(f.node_id, label=label, color=color, title=title)
+        net.add_node(f.node_id, label=label, color=color, title=title,
+                     font={"color": "#e2e8f0", "size": GRAPH_FONT_SIZE},
+                     scaling={"label": {"drawThreshold": LABEL_DRAW_THRESHOLD}})
     nodes = {f.node_id for f in results.values()}
     for p, c in edges:
         if p in nodes and c in nodes:
