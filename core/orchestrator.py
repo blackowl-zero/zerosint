@@ -82,12 +82,17 @@ class Orchestrator:
                      f.meta.get("derived_from") or f.parent or f.source)
         return True
 
-    @staticmethod
-    def _attribute_to_email(seed: Finding, f: Finding) -> None:
-        """A username derived from an email (bob from bob@acme.io) is not a separate
-        account the user gave us: a breach found for it belongs to the email row."""
-        if (f.type == "breach" and seed.source == "input:derived" and seed.parent
+    def _attribute_to_email(self, seed: Finding, f: Finding) -> None:
+        """A username derived from an email (bob from bob@acme.io) is only a guess.
+        When it reports a breach the email itself is already in, it is the same
+        exposure: fold it into the email's row instead of adding a second one.
+        A breach only the guessed username is in stays its own row, under 'bob',
+        so the email is never credited with a breach it was not found in."""
+        if not (f.type == "breach" and seed.source == "input:derived" and seed.parent
                 and f.meta.get("account") == seed.value):
+            return
+        email_row = f"breach:{f.value.strip().lower()}#{seed.parent.strip().lower()}"
+        if email_row in self.results:
             f.meta["account"] = seed.parent
             f.meta["also_via_username"] = [seed.value]
 

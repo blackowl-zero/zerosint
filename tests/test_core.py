@@ -99,6 +99,23 @@ class DerivedUsernameTest(unittest.TestCase):
         self.assertEqual(rows[0].meta["account"], "bob@acme.io")
         self.assertEqual(rows[0].meta.get("also_via_username"), ["bob"])
 
+    def test_breach_only_the_derived_username_has_is_not_pinned_on_the_email(self):
+        """'bob' is a guess (0.4). A breach only 'bob' is in must not be reported as
+        bob@acme.io's breach: it stays its own row, under the username."""
+        from core.normalizer import normalize
+
+        class UsernameOnlyBreach(FakeBreachModule):
+            accepts = {"email", "username"}
+
+            def run(self, seed):
+                return [] if seed.type == "email" else super().run(seed)
+
+        t = Target(label="t")
+        t.seeds = normalize({"email": "bob@acme.io"})
+        results = Orchestrator([UsernameOnlyBreach("hibp")], max_depth=2).run(t)
+        rows = [f for f in results.values() if f.type == "breach"]
+        self.assertEqual([r.meta["account"] for r in rows], ["bob"])
+
     def test_breach_for_explicit_username_stays_separate(self):
         # the user typed both: they are separate accounts, keep both rows
         rows = self._breaches({"email": "bob@acme.io", "username": "bob"})
