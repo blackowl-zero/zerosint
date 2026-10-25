@@ -55,6 +55,27 @@ OLD_PW_USAGE = (
 )
 
 
+def _mentions_check_password(argv: list[str]) -> bool:
+    """True if argv uses --check-password, also abbreviated (--check-pass) or as --x=y."""
+    full = "--check-password"
+    for a in argv:
+        flag = a.split("=", 1)[0]
+        if len(flag) > 3 and flag.startswith("--") and full.startswith(flag):
+            return True
+    return False
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse echoes unknown arguments in its errors. With --check-password one of
+    them may be the password, so in that case the error never repeats them."""
+
+    def error(self, message: str):  # noqa: D401 - argparse API
+        if _mentions_check_password(sys.argv[1:]):
+            self.exit(2, f"{self.prog}: error: invalid arguments for --check-password "
+                         "(not shown, they may contain a password).\n" + OLD_PW_USAGE + "\n")
+        super().error(message)
+
+
 def read_password(stream=None) -> str:
     """Hidden prompt on a terminal; otherwise one line from stdin (for scripts)."""
     stream = sys.stdin if stream is None else stream
@@ -96,7 +117,7 @@ def build_modules():
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="ZeroSint: passive recon aggregator")
+    ap = _Parser(description="ZeroSint: passive recon aggregator")
     ap.add_argument("--name")
     ap.add_argument("--username")
     ap.add_argument("--email")
