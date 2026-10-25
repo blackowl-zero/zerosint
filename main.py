@@ -20,6 +20,7 @@ import argparse
 import contextlib
 import getpass
 import logging
+import signal
 import sys
 
 # load .env if python-dotenv is installed (optional)
@@ -65,6 +66,20 @@ def read_password(stream=None) -> str:
     if line.endswith("\r"):
         line = line[:-1]
     return line
+
+
+@contextlib.contextmanager
+def _sigint_ignored():
+    """Ignore Ctrl+C for the duration of the block (main thread only)."""
+    try:
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:  # not the main thread: nothing to change
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old)
 
 
 def build_modules():
@@ -160,16 +175,17 @@ def main() -> int:
     summary = summarize(results)
     partial = orch.interrupted  # Ctrl+C: save what we have, marked as partial
 
-    # persist
-    store = Storage(args.db)
-    scan_id = store.new_scan(f"{label} (partial)" if partial else label)
-    store.save(scan_id, results, orch.edges)
-    store.close()
+    # persist + reports. Ctrl+C is ignored while saving, so a second press
+    # cannot cut the files short.
+    with _sigint_ignored():
+        store = Storage(args.db)
+        scan_id = store.new_scan(f"{label} (partial)" if partial else label)
+        store.save(scan_id, results, orch.edges)
+        store.close()
 
-    # reports
-    html_report.export_json(results, args.json)
-    html_report.export_html(results, orch.edges, summary, label, args.output,
-                            interrupted=partial)
+        html_report.export_json(results, args.json)
+        html_report.export_html(results, orch.edges, summary, label, args.output,
+                                interrupted=partial)
     rc = 130 if partial else 0  # 130 = the usual exit code after Ctrl+C
 
     shown = False

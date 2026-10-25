@@ -9,10 +9,13 @@ Report generator.
 """
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import logging
+import os
 import re
+import tempfile
 from urllib.parse import urlparse
 
 from core.models import EntityType, Finding
@@ -28,9 +31,24 @@ TYPE_COLOR = {
 }
 
 
+@contextlib.contextmanager
+def _atomic_open(path: str):
+    """Write to a temp file next to `path`, then swap it in. A crash or Ctrl+C
+    mid-write leaves the previous file intact instead of a truncated one."""
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            yield fh
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
 def export_json(results: dict[str, Finding], path: str) -> None:
     data = [f.to_dict() for f in results.values()]
-    with open(path, "w", encoding="utf-8") as fh:
+    with _atomic_open(path) as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2)
     log.info("JSON written: %s", path)
 
@@ -236,6 +254,6 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
 </main>
 </body></html>"""
 
-    with open(path, "w", encoding="utf-8") as fh:
+    with _atomic_open(path) as fh:
         fh.write(doc)
     log.info("HTML written: %s", path)
