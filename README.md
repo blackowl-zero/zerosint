@@ -66,8 +66,8 @@ On Windows, run everything inside WSL (Kali works fine). recon-ng and SpiderFoot
 # username + email
 python main.py --username someuser --email someone@example.com
 
-# a domain, deeper pivot
-python main.py --domain example.com --depth 2
+# a domain, deeper pivot (--depth takes 1-5, default 2)
+python main.py --domain example.com --depth 3
 
 # everything at once
 python main.py --username someuser --email a@b.com --domain b.com --phone "+30 ..."
