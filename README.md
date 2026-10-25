@@ -73,9 +73,14 @@ python main.py --domain example.com --depth 3
 python main.py --username someuser --email a@b.com --domain b.com --phone "+30 ..."
 
 # check if one of your own passwords has leaked
-# uses k-anonymity, the password never leaves your machine
-python main.py --check-password "mypassword"
+# uses k-anonymity, the password never leaves your machine.
+# It asks for the password at a hidden prompt, so it never lands in your shell history:
+python main.py --check-password
+# or pipe it in from a script:
+printf '%s' "$PW" | python main.py --check-password
 ```
+
+`--check-password "mypassword"` (the old form) is refused with a short explanation, because the password would end up in your shell history and in `ps`.
 
 You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run.
 

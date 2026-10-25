@@ -8,7 +8,8 @@ Missing tools are skipped (graceful degrade), so it always runs.
 Usage:
     python main.py --username blackowl-zero --email me@example.com
     python main.py --domain example.com --depth 2 -o report.html
-    python main.py --check-password 'to_diko_mou_password'   # k-anonymity util
+    python main.py --check-password                          # k-anonymity util, hidden prompt
+    printf '%s' "$PW" | python main.py --check-password      # same, password from stdin
     python main.py --email me@example.com --plain            # plain output (pipes/CI)
 
 Authorized / educational use only. Passive recon. No credential testing.
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import getpass
 import logging
 import sys
 
@@ -42,6 +44,27 @@ from modules.harvester_mod import HarvesterModule
 from modules.reconng_mod import ReconngModule
 from modules.spiderfoot_mod import SpiderfootModule
 from modules.phoneinfoga_mod import PhoneInfogaModule
+
+
+OLD_PW_USAGE = (
+    "--check-password no longer takes the password as an argument "
+    "(it would end up in your shell history).\n"
+    "  Interactive: python main.py --check-password   (hidden prompt)\n"
+    "  Scripted:    printf '%s' \"$PW\" | python main.py --check-password"
+)
+
+
+def read_password(stream=None) -> str:
+    """Hidden prompt on a terminal; otherwise one line from stdin (for scripts)."""
+    stream = sys.stdin if stream is None else stream
+    if stream.isatty():
+        return getpass.getpass("Password (hidden): ")
+    line = stream.readline()
+    if line.endswith("\n"):
+        line = line[:-1]
+    if line.endswith("\r"):
+        line = line[:-1]
+    return line
 
 
 def build_modules():
@@ -72,12 +95,18 @@ def main() -> int:
     ap.add_argument("--json", default="zerosint_findings.json")
     ap.add_argument("--db", default="zerosint.db")
     ap.add_argument("--label", default=None, help="friendly name for the report")
-    ap.add_argument("--check-password", metavar="PW",
-                    help="k-anonymity password breach check (standalone util)")
+    ap.add_argument("--check-password", nargs="?", const=True, default=None, metavar="",
+                    help="k-anonymity password breach check: hidden prompt, or "
+                         "the password from stdin when piped")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--plain", action="store_true",
                     help="plain text output, no Rich UI (for pipes, CI, logs)")
     args = ap.parse_args()
+
+    # old usage: --check-password "pw" (the password would sit in shell history)
+    if isinstance(args.check_password, str):
+        print(OLD_PW_USAGE, file=sys.stderr)
+        return 2
 
     # Rich UI by default; None = plain (--plain, not a TTY, or rich is missing)
     ui = ui_console.make_ui(plain=args.plain)
@@ -93,7 +122,11 @@ def main() -> int:
 
     # standalone utility: check your own password with k-anonymity
     if args.check_password:
-        n = check_password_pwned(args.check_password)
+        pw = read_password()
+        if not pw:
+            print("No password given.", file=sys.stderr)
+            return 2
+        n = check_password_pwned(pw)
         if n < 0:
             print("Could not reach pwned-passwords API.")
         elif n == 0:
