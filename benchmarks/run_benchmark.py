@@ -138,24 +138,37 @@ def webmail_module_runs(text: str, requested_domains: set[str]) -> dict[str, int
         if not m:
             continue
         _depth, module, type_, value = m.groups()
-        if type_ in ("domain", "subdomain") and is_webmail(value) \
-                and value.strip().lower() not in requested_domains:
+        if type_ in DOMAIN_TYPES and is_webmail(value) and not _requested(value, requested_domains):
             out[module] = out.get(module, 0) + 1
     return out
 
 
+# same rule as zerosint's orchestrator: these types name a domain, and a
+# subdomain of a domain the user asked for counts as asked for
+DOMAIN_TYPES = ("domain", "subdomain", "host")
+
+
+def _requested(value: str, requested_domains: set[str]) -> bool:
+    v = value.strip().lower().rstrip(".")
+    return any(v == d or v.endswith("." + d) for d in requested_domains)
+
+
 # ---------------------------------------------------------------- false positives
 def auto_flags(findings: list[dict], requested_domains: set[str]) -> dict[str, list[str]]:
-    """Objective false-positive rules. Returns {rule: [finding_key, ...]}."""
-    by_value = {str(f["value"]).strip().lower(): f for f in findings}
+    """Objective false-positive rules. Returns {rule: [finding_key, ...]}, one entry
+    per false-positive row (for duplicates: every copy after the first)."""
+    # parent links are values; resolve them by (value) among non-leaf types first
+    by_value: dict[str, dict] = {}
+    for f in findings:
+        by_value.setdefault(str(f["value"]).strip().lower(), f)
 
     def under_unrequested_webmail(f: dict) -> bool:
         seen = set()
         parent = f.get("parent")
-        while parent and parent.lower() not in seen:
+        while parent and parent.strip().lower() not in seen:
             p = parent.strip().lower()
             seen.add(p)
-            if is_webmail(p) and "@" not in p and p not in requested_domains:
+            if is_webmail(p) and "@" not in p and not _requested(p, requested_domains):
                 return True
             parent = (by_value.get(p) or {}).get("parent")
         return False
@@ -163,43 +176,73 @@ def auto_flags(findings: list[dict], requested_domains: set[str]) -> dict[str, l
     rows = reported(findings)
     flags: dict[str, list[str]] = {"webmail_domain": [], "webmail_noise": [],
                                    "sfurl": [], "duplicate": []}
-    counts: dict[str, int] = {}
-    for f in rows:
-        counts[finding_key(f)] = counts.get(finding_key(f), 0) + 1
     for f in rows:
         k = finding_key(f)
         v = str(f["value"]).strip().lower()
-        if f["type"] in ("domain", "subdomain") and is_webmail(v) and v not in requested_domains \
+        if f["type"] in DOMAIN_TYPES and is_webmail(v) and not _requested(v, requested_domains) \
                 and not under_unrequested_webmail(f):
             flags["webmail_domain"].append(k)
         elif under_unrequested_webmail(f):
             flags["webmail_noise"].append(k)
         if "<sfurl>" in v:
             flags["sfurl"].append(k)
-        if counts[k] > 1 and k not in flags["duplicate"]:
+
+    # duplicate rows a reader sees as "the same thing twice":
+    #  - the same breach for an email and for the username cut from it (bob, bob@x)
+    #  - the same value reported twice under the same key (kept for safety)
+    breaches: dict[str, set[str]] = {}
+    for f in rows:
+        if f["type"] == "breach":
+            acct = str((f.get("meta") or {}).get("account") or "").strip().lower()
+            breaches.setdefault(str(f["value"]).strip().lower(), set()).add(acct)
+    for name, accounts in breaches.items():
+        for a in accounts:
+            if "@" not in a and any(b.split("@", 1)[0] == a for b in accounts if "@" in b):
+                flags["duplicate"].append(f"breach:{name}#{a}")
+    seen_keys: set[str] = set()
+    for f in rows:
+        k = finding_key(f)
+        if k in seen_keys:
             flags["duplicate"].append(k)
+        seen_keys.add(k)
     return flags
+
+
+VERDICTS = ("mine", "not_mine")
 
 
 def score_target(findings: list[dict], verdicts: dict[str, str],
                  requested_domains: set[str]) -> dict:
+    bad = {k: v for k, v in verdicts.items() if v not in VERDICTS}
+    if bad:
+        raise ValueError(f"verdicts must be one of {VERDICTS}, got: {bad}")
     flags = auto_flags(findings, requested_domains)
-    auto = {k for ks in flags.values() for k in ks}
     rows = reported(findings)
     keys = [finding_key(f) for f in rows]
-    not_mine = {k for k in keys if verdicts.get(k) == "not_mine"}
-    unreviewed = sorted({k for k in keys if k not in verdicts and k not in auto})
-    # every duplicate row beyond the first is a false positive row
-    extra_dup_rows = sum(keys.count(k) - 1 for k in set(flags["duplicate"]))
-    fp_keys = auto | not_mine
+    # one false positive per flagged row; a row flagged by two rules counts once
+    auto_rows = {k for rule in ("webmail_domain", "webmail_noise", "sfurl") for k in flags[rule]}
+    dup_extra = len(flags["duplicate"])
+    not_mine = {k for k in keys if verdicts.get(k) == "not_mine"} - auto_rows
+    unreviewed = sorted({k for k in keys if k not in verdicts and k not in auto_rows})
     return {
         "rows": len(rows),
         "auto_flags": {k: len(v) for k, v in flags.items()},
-        "not_mine": len(not_mine - auto),
+        "not_mine": len(not_mine),
         "unreviewed": len(unreviewed),
         "unreviewed_keys": unreviewed,
-        "false_positives": None if unreviewed else len(fp_keys) + extra_dup_rows,
+        "false_positives": None if unreviewed else len(auto_rows) + len(not_mine) + dup_extra,
     }
+
+
+def target_reliable(t: dict) -> tuple[bool, str]:
+    """Was this target's run complete enough to be counted?"""
+    if t.get("timed_out"):
+        return False, "scan timed out (findings file missing or incomplete)"
+    if t.get("exit_code") not in (0,):
+        return False, f"zerosint exited with {t.get('exit_code')}"
+    if t.get("findings_file_ok") is False:
+        return False, "no findings file written"
+    return True, ""
 
 
 def reduction(before, after):
@@ -251,8 +294,9 @@ def run_target(python: str, repo: str, target: dict, depth: int, timeout: int) -
         try:
             with open(os.path.join(work, "findings.json"), encoding="utf-8") as fh:
                 findings = json.load(fh)
+            findings_ok = True
         except (OSError, ValueError):
-            findings = []
+            findings, findings_ok = [], False
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -267,7 +311,7 @@ def run_target(python: str, repo: str, target: dict, depth: int, timeout: int) -
     return {
         "name": target["name"], "args_kind": target["name"].split(":")[0],
         "exit_code": rc, "timed_out": timed_out, "duration_s": duration,
-        "errors": errors,
+        "findings_file_ok": findings_ok, "errors": errors,
         "webmail_module_runs": webmail_module_runs(log, requested),
         "requested_domains": sorted(requested),
         "findings": [{k: f.get(k) for k in ("type", "value", "source", "parent", "depth",
@@ -379,33 +423,50 @@ def cmd_compare(a) -> int:
             bad = {u: s for u, s in res[when].items() if s != 200}
             if bad:
                 notes.append(f"{label} {when}: unreachable/non-200 {bad}")
-    rl = {lbl: ta["cats"].get("rate_limit_exhausted", 0) if lbl == "before"
-          else tb["cats"].get("rate_limit_exhausted", 0) for lbl in ("before", "after")}
-    if any(rl.values()):
-        notes.append(f"rate limits hit {rl}: breach-module counts depend on API quota, not code")
+    # a target whose run did not complete on either side makes every total unreliable
+    broken = []
+    for t1, t2 in zip(A["targets"], B["targets"]):
+        for label, t in (("before", t1), ("after", t2)):
+            ok, why = target_reliable(t)
+            if not ok:
+                broken.append(t["name"])
+                notes.append(f"{label} {t['name']}: {why}")
+    rate_limited = ta["cats"].get("rate_limit_exhausted", 0) or tb["cats"].get("rate_limit_exhausted", 0)
+    if rate_limited:
+        notes.append("rate limits hit: error counts depend on API quota, not on the code")
+    unreliable_totals = bool(broken) or bool(rate_limited)
 
-    def row(name, b, c):
-        r = reduction(b, c)
+    def row(name, b, c, unreliable=False):
         fmt = lambda v: "not measured" if v is None else str(v)  # noqa: E731
-        return f"| {name} | {fmt(b)} | {fmt(c)} | {'n/a' if r is None else f'{r}%'} |"
+        if unreliable:
+            pct = "not reliably measurable"
+        elif b == 0 and c and c > 0:
+            pct = f"increase (0 -> {c})"
+        else:
+            r = reduction(b, c)
+            pct = "n/a" if r is None else f"{r}%" + (" (small base)" if b is not None and b < 5 else "")
+        return f"| {name} | {fmt(b)} | {fmt(c)} | {pct} |"
 
     out = [f"before: {A['label']} @ {A['commit'][:7]}   after: {B['label']} @ {B['commit'][:7]}", "",
            "| metric | before | after | reduction |", "|---|---|---|---|",
-           row("errors (total)", ta["errors"], tb["errors"]),
-           row("false positives (total)", ta["fp"], tb["fp"]),
-           row("module runs on webmail domains", ta["webmail_runs"], tb["webmail_runs"]), "",
+           row("errors (total)", ta["errors"], tb["errors"], unreliable_totals),
+           row("false positives (total)", ta["fp"], tb["fp"], bool(broken)),
+           row("module runs on webmail domains", ta["webmail_runs"], tb["webmail_runs"],
+               bool(broken)), "",
            "| error category | before | after | reduction |", "|---|---|---|---|"]
     for c in sorted(set(ta["cats"]) | set(tb["cats"])):
-        out.append(row(c, ta["cats"].get(c, 0), tb["cats"].get(c, 0)))
+        out.append(row(c, ta["cats"].get(c, 0), tb["cats"].get(c, 0), unreliable_totals))
     out += ["", "| errors by module | before | after | reduction |", "|---|---|---|---|"]
     for m in sorted(set(ta["mods"]) | set(tb["mods"])):
-        out.append(row(m, ta["mods"].get(m, 0), tb["mods"].get(m, 0)))
-    out += ["", "| per target | errors before | errors after | FP before | FP after |",
-            "|---|---|---|---|---|"]
+        out.append(row(m, ta["mods"].get(m, 0), tb["mods"].get(m, 0), unreliable_totals))
+    out += ["", "| per target | errors before | errors after | FP before | FP after | FP reduction |",
+            "|---|---|---|---|---|---|"]
     for t1, t2 in zip(A["targets"], B["targets"]):
         s1, s2 = t1.get("score") or {}, t2.get("score") or {}
+        f1, f2 = s1.get("false_positives"), s2.get("false_positives")
+        pct = row("", f1, f2, t1["name"] in broken).rsplit("|", 2)[-2].strip()
         out.append(f"| {t1['name']} | {t1['errors']['total']} | {t2['errors']['total']} | "
-                   f"{s1.get('false_positives')} | {s2.get('false_positives')} |")
+                   f"{f1} | {f2} | {pct} |")
     if notes:
         out += ["", "Reliability notes:"] + [f"- {n}" for n in notes]
     print("\n".join(out))
