@@ -11,6 +11,7 @@ import logging
 from collections import deque
 
 from .models import Finding, Target
+from .webmail import DOMAIN_TYPES, is_under, is_webmail
 from modules.base import BaseModule
 
 log = logging.getLogger("osint")
@@ -33,6 +34,8 @@ class Orchestrator:
         self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id), unique
         self._edge_set: set[tuple[str, str]] = set()
         self.interrupted = False  # True after a Ctrl+C inside run()
+        self._requested_domains: set[str] = set()
+        self._webmail_logged: set[str] = set()
 
     def _notify(self, event: str, *args) -> None:
         """Notify the UI. A UI error must never break the scan."""
@@ -59,11 +62,32 @@ class Orchestrator:
         self.results[f.key] = f
         return True
 
+    def _is_unrequested_webmail(self, f: Finding) -> bool:
+        """The one place the webmail rule lives: a webmail domain (gmail.com,
+        mail.gmail.com, ...) is dropped, whoever found it, unless the user asked
+        for it (or a parent domain of it) with --domain."""
+        if f.type not in DOMAIN_TYPES or not is_webmail(f.value):
+            return False
+        if any(is_under(f.value, d) for d in self._requested_domains):
+            return False
+        if f.value.lower() not in self._webmail_logged:
+            self._webmail_logged.add(f.value.lower())
+            log.info("Not scanning webmail domain %s (from %s)", f.value,
+                     f.meta.get("derived_from") or f.parent or f.source)
+        return True
+
     def run(self, target: Target) -> dict[str, Finding]:
         queue: deque[Finding] = deque()
+        # domains the user typed (not derived from an email)
+        self._requested_domains = {
+            s.value for s in target.seeds
+            if s.type in DOMAIN_TYPES and s.source == "input" and not s.meta.get("derived_from")
+        }
 
         # queue the initial seeds
         for seed in target.seeds:
+            if self._is_unrequested_webmail(seed):
+                continue
             if self._store(seed):
                 queue.append(seed)
 
@@ -111,6 +135,8 @@ class Orchestrator:
                     found = []
 
                 for f in found:
+                    if self._is_unrequested_webmail(f):
+                        continue
                     self._notify("finding", f)
                     is_new = self._store(f)
                     # edge for the graph (parent seed -> finding)

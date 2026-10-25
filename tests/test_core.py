@@ -78,5 +78,89 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(Finding(type="breach", value="Adobe").key, "breach:adobe")
 
 
+class EmitModule:
+    """For an email seed, reports whatever domains it was given (like SpiderFoot)."""
+
+    name = "emitter"
+    accepts = {"email"}
+
+    def __init__(self, *found: tuple[str, str]) -> None:
+        self.found = found
+
+    def available(self) -> bool:
+        return True
+
+    def handles(self, seed: Finding) -> bool:
+        return seed.type in self.accepts
+
+    def run(self, seed: Finding) -> list[Finding]:
+        return [Finding(type=t, value=v, source=self.name, parent=seed.value,
+                        confidence=0.6, depth=seed.depth + 1) for t, v in self.found]
+
+
+class DomainRecorder:
+    """Records every domain/subdomain it is asked to scan (like theHarvester)."""
+
+    name = "recorder"
+    accepts = {"domain", "subdomain"}
+
+    def __init__(self) -> None:
+        self.scanned: list[str] = []
+
+    def available(self) -> bool:
+        return True
+
+    def handles(self, seed: Finding) -> bool:
+        return seed.type in self.accepts
+
+    def run(self, seed: Finding) -> list[Finding]:
+        self.scanned.append(seed.value)
+        return []
+
+
+class WebmailFilterTest(unittest.TestCase):
+    """Webmail domains are never scanned unless the user passed them with --domain,
+    whichever module or input they come from."""
+
+    def _run(self, raw: dict, *emitted):
+        from core.normalizer import normalize
+        t = Target(label="t")
+        t.seeds = normalize(raw)
+        rec = DomainRecorder()
+        o = Orchestrator([EmitModule(*emitted), rec], max_depth=3)
+        results = o.run(t)
+        return rec.scanned, {(f.type, f.value) for f in results.values()}
+
+    def test_webmail_from_a_module_not_scanned_nor_reported(self):
+        scanned, found = self._run({"email": "bob@acme.io"},
+                                   ("domain", "gmail.com"), ("subdomain", "mail.GMAIL.com"))
+        self.assertNotIn("gmail.com", scanned)
+        self.assertNotIn("mail.GMAIL.com", scanned)
+        self.assertNotIn(("domain", "gmail.com"), found)
+        self.assertNotIn(("subdomain", "mail.GMAIL.com"), found)
+
+    def test_webmail_domain_of_input_email_not_scanned(self):
+        scanned, found = self._run({"email": "someone@GMail.COM"})
+        self.assertEqual(scanned, [])
+        self.assertNotIn("domain", {t for t, _ in found})
+
+    def test_explicit_and_email_on_same_webmail_domain_is_scanned(self):
+        scanned, _ = self._run({"email": "x@gmail.com", "domain": "gmail.com"})
+        self.assertEqual(scanned, ["gmail.com"])
+
+    def test_explicit_webmail_domain_is_scanned(self):
+        scanned, _ = self._run({"domain": "gmail.com"})
+        self.assertEqual(scanned, ["gmail.com"])
+
+    def test_subdomain_of_explicit_webmail_domain_is_scanned(self):
+        scanned, _ = self._run({"domain": "gmail.com", "email": "bob@acme.io"},
+                               ("subdomain", "mail.gmail.com"))
+        self.assertIn("mail.gmail.com", scanned)
+
+    def test_other_domains_still_scanned(self):
+        scanned, _ = self._run({"email": "bob@acme.io"}, ("domain", "acme-cdn.net"))
+        self.assertEqual(sorted(scanned), ["acme-cdn.net", "acme.io"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

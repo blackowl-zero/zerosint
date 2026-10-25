@@ -21,13 +21,16 @@ def _pairs(seeds) -> list[tuple[str, str]]:
 
 
 class NormalizerTest(unittest.TestCase):
-    def test_freemail_domain_not_seeded(self):
-        seeds = normalize({"email": "someone@gmail.com"})
-        self.assertEqual([s.type for s in seeds], ["email", "username"])
+    # (the webmail rule itself lives in the orchestrator, see tests/test_core.py)
+    def test_domain_from_email_marked_as_derived(self):
+        dom = [s for s in normalize({"email": "x@acme.io"}) if s.type == "domain"]
+        self.assertEqual(dom[0].meta.get("derived_from"), "x@acme.io")
 
-    def test_freemail_case_insensitive(self):
-        seeds = normalize({"email": "X@GMail.COM"})
-        self.assertNotIn("domain", [s.type for s in seeds])
+    def test_explicit_domain_clears_derived_mark(self):
+        dom = [s for s in normalize({"email": "x@gmail.com", "domain": "gmail.com"})
+               if s.type == "domain"]
+        self.assertEqual(len(dom), 1)
+        self.assertNotIn("derived_from", dom[0].meta)
 
     def test_company_domain_still_seeded(self):
         self.assertIn(("domain", "acme.io"), _pairs(normalize({"email": "a@acme.io"})))
