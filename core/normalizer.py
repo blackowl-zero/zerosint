@@ -6,10 +6,26 @@ Example: the user enters "user@example.com" -> detected as EMAIL, and
 """
 from __future__ import annotations
 
-import re
 import ipaddress
+import logging
+import re
 
 from .models import EntityType, Finding
+
+log = logging.getLogger("osint")
+
+# Free webmail providers. An email on one of these says nothing about the
+# target's own infrastructure, so its domain is NOT added as a seed (that would
+# make theHarvester/recon-ng/SpiderFoot scan e.g. all of gmail.com).
+# An explicit --domain is still scanned.
+FREEMAIL_DOMAINS: frozenset[str] = frozenset({
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.gr", "ymail.com",
+    "hotmail.com", "hotmail.gr", "outlook.com", "outlook.com.gr", "live.com",
+    "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me",
+    "protonmail.com", "pm.me", "gmx.com", "gmx.de", "gmx.net", "yandex.com",
+    "yandex.ru", "mail.ru", "zoho.com", "tutanota.com", "tuta.io", "otenet.gr",
+    "windowslive.com",
+})
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,}$", re.I)
@@ -63,16 +79,20 @@ def normalize(raw_inputs: dict[str, str]) -> list[Finding]:
         seeds.append(f)
 
     for declared_type, value in raw_inputs.items():
+        value = (value or "").strip()
         if not value:
             continue
         # if the key is a known type, trust it; otherwise auto-detect
         t = declared_type if declared_type in EntityType._value2member_map_ else detect_type(value)
         push(t, value)
 
-        # auto-derive: email -> domain
+        # auto-derive: email -> domain (not for free webmail providers)
         if t == EntityType.EMAIL and "@" in value:
             domain = value.split("@", 1)[1]
-            push(EntityType.DOMAIN, domain)
+            if domain.lower() in FREEMAIL_DOMAINS:
+                log.info("Not scanning webmail domain %s (from %s)", domain, value)
+            else:
+                push(EntityType.DOMAIN, domain)
         # auto-derive: email local-part -> candidate username (low confidence)
         if t == EntityType.EMAIL and "@" in value:
             local = value.split("@", 1)[0]
