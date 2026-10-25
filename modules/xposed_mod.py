@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+from urllib.parse import quote
 
 import requests
 
@@ -60,7 +61,7 @@ class XposedModule(BaseModule):
         for attempt in range(2):
             try:
                 r = requests.get(
-                    XPOSED_API.format(email=email),
+                    XPOSED_API.format(email=quote(email, safe="@")),
                     headers={"User-Agent": USER_AGENT},
                     timeout=TIMEOUT,
                 )
