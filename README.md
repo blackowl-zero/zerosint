@@ -80,7 +80,24 @@ python main.py --check-password
 printf '%s' "$PW" | python main.py --check-password
 ```
 
-`--check-password "mypassword"` (the old form) is refused with a short explanation, because the password would end up in your shell history and in `ps`.
+`--check-password "mypassword"` (the old form) is refused with a short explanation, because the password would end up in your shell history and in `ps`. Error messages never repeat what you typed on the command line, so a password typed by mistake (even with a misspelled flag) is not printed back. Ctrl+C at the hidden prompt just cancels (exit 130).
+
+The graph in the report runs in a sandboxed frame (scripts only) and shows a label on every node.
+
+### Benchmark
+
+`benchmarks/run_benchmark.py` measures errors and false positives on a fixed set of targets, to compare two versions of zerosint (run it inside WSL):
+
+```bash
+# run against a checkout (e.g. a git worktree of main), outputs go to a temp dir
+python benchmarks/run_benchmark.py run --repo PATH --gmail you@gmail.com --label main --out benchmarks/baseline_main.json
+# list findings, mark each one "mine" / "not_mine" in benchmarks/verdicts.json, then score
+python benchmarks/run_benchmark.py review benchmarks/baseline_main.json --out benchmarks/review.md
+python benchmarks/run_benchmark.py score benchmarks/baseline_main.json --verdicts benchmarks/verdicts.json
+python benchmarks/run_benchmark.py compare benchmarks/baseline_main.json benchmarks/after_fixes.json
+```
+
+Results contain real scan data, so `benchmarks/*.json` and `*.md` are git-ignored.
 
 You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run. The HTML report is a single file that works offline, with nothing next to it.
 
