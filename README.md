@@ -11,7 +11,7 @@ It wraps tools you probably already use: Maigret, theHarvester, recon-ng, Spider
 - Takes any mix of inputs: username, email, domain, IP, phone.
 - Runs the right tool for each one. Username goes to Maigret, domain to theHarvester and recon-ng, email to the breach checks, phone to PhoneInfoga.
 - Pivots. Anything it finds becomes a new input, so an email leads to breaches, a domain leads to subdomains and more emails, and so on, up to a depth you set.
-- An email's domain is scanned too (`me@acme.io` also scans `acme.io`), except for free webmail providers like gmail.com, outlook.com or yahoo.gr. Scanning those tells you nothing about the target. If you really want one scanned, pass it with `--domain`.
+- An email's domain is scanned too (`me@acme.io` also scans `acme.io`), except for free webmail providers like gmail.com, outlook.com or yahoo.gr. Scanning those tells you nothing about the target. The same applies when a tool finds a webmail domain or subdomain on its own (e.g. SpiderFoot reporting `gmail.com`): it is dropped, not scanned and not reported. If you really want one scanned, pass it with `--domain` (its subdomains are then scanned too).
 - Scores every finding. If two tools agree on something, its confidence goes up. The further a finding sits from your original input, the lower it gets weighted.
 - Writes an HTML report with a findings table and a relationship graph, plus a JSON file and a SQLite database.
 
