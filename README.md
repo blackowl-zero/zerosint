@@ -22,7 +22,7 @@ It wraps tools you probably already use: Maigret, theHarvester, recon-ng, Spider
 | Maigret | username | maigret installed |
 | theHarvester | domain | theHarvester installed |
 | recon-ng | domain | recon-cli + one marketplace module (see setup) |
-| SpiderFoot | domain, email, ip | sf.py on PATH |
+| SpiderFoot | domain, email, ip (your own inputs only, it's slow) | `spiderfoot` (Kali package) or sf.py on PATH / `SPIDERFOOT_PATH` |
 | XposedOrNot | email | nothing, it's free and keyless |
 | PhoneInfoga | phone | phoneinfoga binary |
 | HIBP | email, username | paid API key, optional |
@@ -52,7 +52,10 @@ pip install maigret theHarvester
 # recon-ng ships with zero modules, install the keyless one this tool uses:
 recon-cli -C "marketplace install recon/domains-hosts/hackertarget"
 
-# SpiderFoot and PhoneInfoga have their own setup, grab them from their repos.
+# SpiderFoot: on Kali the package is enough
+sudo apt install spiderfoot
+
+# PhoneInfoga has its own setup, grab it from its repo.
 ```
 
 On Windows, run everything inside WSL (Kali works fine). recon-ng and SpiderFoot don't behave on native Windows.
