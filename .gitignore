@@ -18,3 +18,8 @@ harvest_*
 /phoneinfoga.exe
 *.exe
 /bin/
+
+# benchmark results hold scan data about real accounts
+benchmarks/*.json
+benchmarks/*.md
+benchmarks/*.index.json
