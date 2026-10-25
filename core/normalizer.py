@@ -6,8 +6,8 @@ Example: the user enters "user@example.com" -> detected as EMAIL, and
 """
 from __future__ import annotations
 
-import re
 import ipaddress
+import re
 
 from .models import EntityType, Finding
 
@@ -52,27 +52,36 @@ def normalize(raw_inputs: dict[str, str]) -> list[Finding]:
     seeds: list[Finding] = []
     seen: set[str] = set()
 
-    def push(type_: str, value: str) -> None:
+    def push(type_: str, value: str, derived_from: str | None = None) -> None:
         value = value.strip()
         if not value:
             return
-        f = Finding(type=type_, value=value, source="input", confidence=1.0, depth=0)
+        # derived_from marks a seed the user did not type themselves (the
+        # orchestrator uses it to skip webmail domains)
+        meta = {"derived_from": derived_from} if derived_from else {}
+        f = Finding(type=type_, value=value, source="input", confidence=1.0, depth=0, meta=meta)
         if f.key in seen:
+            if not derived_from:  # typed explicitly too: it is a real request
+                for s in seeds:
+                    if s.key == f.key:
+                        s.meta.pop("derived_from", None)
+                        if s.source == "input:derived":  # e.g. --username bob after --email bob@x
+                            s.source, s.parent, s.confidence = "input", None, 1.0
             return
         seen.add(f.key)
         seeds.append(f)
 
     for declared_type, value in raw_inputs.items():
+        value = (value or "").strip()
         if not value:
             continue
         # if the key is a known type, trust it; otherwise auto-detect
         t = declared_type if declared_type in EntityType._value2member_map_ else detect_type(value)
         push(t, value)
 
-        # auto-derive: email -> domain
+        # auto-derive: email -> domain (webmail domains are dropped by the orchestrator)
         if t == EntityType.EMAIL and "@" in value:
-            domain = value.split("@", 1)[1]
-            push(EntityType.DOMAIN, domain)
+            push(EntityType.DOMAIN, value.split("@", 1)[1], derived_from=value)
         # auto-derive: email local-part -> candidate username (low confidence)
         if t == EntityType.EMAIL and "@" in value:
             local = value.split("@", 1)[0]

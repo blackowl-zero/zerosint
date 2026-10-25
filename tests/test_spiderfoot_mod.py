@@ -93,12 +93,55 @@ class SpiderfootDegradeTest(unittest.TestCase):
             self.assertFalse(mod.available())
             self.assertEqual(mod.run(Finding(type=EntityType.DOMAIN, value="github.com")), [])
 
+    def test_messages_name_the_kali_binary(self):
+        """Messages and metadata point at what Kali actually installs (`spiderfoot`)."""
+        mod = SpiderfootModule()
+        self.assertEqual(mod.requires_binary, "spiderfoot")
+        with mock.patch("modules.spiderfoot_mod.shutil.which", return_value=None), \
+             mock.patch.dict(os.environ, {"SPIDERFOOT_PATH": ""}), \
+             self.assertLogs("osint", level="INFO") as logs:
+            mod.run(Finding(type=EntityType.DOMAIN, value="github.com"))
+        msg = logs.output[0]
+        self.assertIn("spiderfoot not found", msg)
+        self.assertIn("SPIDERFOOT_PATH", msg)
+        self.assertNotIn("sf.py missing", msg)
+
     def test_found_via_spiderfoot_path(self):
         d = tempfile.mkdtemp()
         open(os.path.join(d, "sf.py"), "w").close()
         with mock.patch("modules.spiderfoot_mod.shutil.which", return_value=None), \
              mock.patch.dict(os.environ, {"SPIDERFOOT_PATH": d}):
             self.assertTrue(SpiderfootModule().available())
+
+    def test_found_as_kali_spiderfoot_binary(self):
+        """Kali ships /usr/bin/spiderfoot (a wrapper for sf.py), not sf.py on PATH."""
+        mod = SpiderfootModule()
+        which = lambda n: "/usr/bin/spiderfoot" if n == "spiderfoot" else None  # noqa: E731
+        with mock.patch("modules.spiderfoot_mod.shutil.which", side_effect=which), \
+             mock.patch.dict(os.environ, {"SPIDERFOOT_PATH": ""}), \
+             mock.patch.object(SpiderfootModule, "_exec", return_value=(0, "[]\n", "")) as ex:
+            self.assertTrue(mod.available())
+            mod.run(Finding(type=EntityType.DOMAIN, value="github.com", depth=0))
+        self.assertEqual(ex.call_args.args[0][:3], ["/usr/bin/spiderfoot", "-s", "github.com"])
+
+
+class SpiderfootDataTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mod = SpiderfootModule()
+        mock.patch.object(SpiderfootModule, "_locate", return_value="/opt/spiderfoot/sf.py").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def test_sfurl_unwrapped(self):
+        rows = [{"type": "Social Media Presence",
+                 "data": "Twitter: <SFURL>https://twitter.com/bob</SFURL>"}]
+        seed = Finding(type=EntityType.DOMAIN, value="github.com", depth=0)
+        with mock.patch.object(SpiderfootModule, "_exec", return_value=(0, sf_stdout(rows), "")):
+            out = self.mod.run(seed)
+        self.assertEqual([(f.type, f.value) for f in out], [("profile_url", "https://twitter.com/bob")])
+
+    def test_only_runs_on_original_inputs(self):
+        self.assertFalse(self.mod.handles(Finding(type="domain", value="x.com", depth=1)))
+        self.assertTrue(self.mod.handles(Finding(type="domain", value="x.com", depth=0)))
 
 
 if __name__ == "__main__":

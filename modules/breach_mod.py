@@ -19,6 +19,7 @@ import hashlib
 import logging
 import os
 import time
+from urllib.parse import quote
 
 import requests
 
@@ -30,6 +31,12 @@ log = logging.getLogger("osint")
 HIBP_API = "https://haveibeenpwned.com/api/v3/breachedaccount/{account}"
 PWNED_PW_API = "https://api.pwnedpasswords.com/range/{prefix}"
 USER_AGENT = "zerosint-research/0.1"
+
+# HIBP 429 handling: up to MAX_RETRIES retries, waiting Retry-After seconds when
+# the header is a number, otherwise BACKOFF_BASE * 2**n. Every wait is capped.
+MAX_RETRIES = 3
+BACKOFF_BASE = 1
+MAX_RETRY_WAIT = 10  # seconds
 
 
 def check_password_pwned(password: str) -> int:
@@ -51,8 +58,10 @@ def check_password_pwned(password: str) -> int:
         log.warning("[breach] pwned-passwords error: %s", e)
         return -1
     for line in r.text.splitlines():
-        h, count = line.split(":")
-        if h == suffix:
+        h, sep, count = line.partition(":")
+        if not sep:
+            continue  # not a "HASH:COUNT" line
+        if h.strip() == suffix:
             return int(count)
     return 0
 
@@ -68,27 +77,45 @@ class BreachModule(BaseModule):
     def available(self) -> bool:
         return bool(self.api_key)
 
+    def _get(self, account: str) -> requests.Response | None:
+        """GET with bounded retries on 429. None = failure (already logged)."""
+        url = HIBP_API.format(account=quote(account, safe="@"))
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                r = requests.get(
+                    url,
+                    headers={"hibp-api-key": self.api_key, "User-Agent": USER_AGENT},
+                    params={"truncateResponse": "false"},
+                    timeout=20,
+                )
+            except requests.RequestException as e:
+                log.warning("[breach] request error: %s", e)
+                return None
+            if r.status_code != 429:
+                return r
+            if attempt == MAX_RETRIES:
+                break
+            try:
+                wait = int(r.headers.get("retry-after", ""))
+            except ValueError:
+                wait = BACKOFF_BASE * 2 ** attempt
+            wait = max(0, min(wait, MAX_RETRY_WAIT))
+            log.info("[breach] 429 rate limited, retry %d/%d in %ss",
+                     attempt + 1, MAX_RETRIES, wait)
+            time.sleep(wait)
+
+        log.error("[breach] HIBP still rate limited for %s after %d retries, skipping",
+                  account, MAX_RETRIES)
+        return None
+
     def run(self, seed: Finding) -> list[Finding]:
         if not self.api_key:
             log.info("[breach] no HIBP_API_KEY, skipping %s", seed.value)
             return []
 
-        try:
-            r = requests.get(
-                HIBP_API.format(account=seed.value),
-                headers={"hibp-api-key": self.api_key, "User-Agent": USER_AGENT},
-                params={"truncateResponse": "false"},
-                timeout=20,
-            )
-        except requests.RequestException as e:
-            log.warning("[breach] request error: %s", e)
+        r = self._get(seed.value)
+        if r is None:
             return []
-
-        # HIBP rate limit -> wait and retry once
-        if r.status_code == 429:
-            wait = int(r.headers.get("retry-after", "2"))
-            time.sleep(min(wait, 10))
-            return self.run(seed)
         if r.status_code == 404:
             return []  # clean, no breach
         if r.status_code != 200:

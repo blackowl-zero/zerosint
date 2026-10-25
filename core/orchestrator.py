@@ -11,6 +11,7 @@ import logging
 from collections import deque
 
 from .models import Finding, Target
+from .webmail import DOMAIN_TYPES, is_under, is_webmail
 from modules.base import BaseModule
 
 log = logging.getLogger("osint")
@@ -30,7 +31,11 @@ class Orchestrator:
         self.max_depth = max_depth
         self.max_findings = max_findings
         self.results: dict[str, Finding] = {}   # key -> Finding (deduped)
-        self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id)
+        self.edges: list[tuple[str, str]] = []  # (parent_node_id, child_node_id), unique
+        self._edge_set: set[tuple[str, str]] = set()
+        self.interrupted = False  # True after a Ctrl+C inside run()
+        self._requested_domains: set[str] = set()
+        self._webmail_logged: set[str] = set()
 
     def _notify(self, event: str, *args) -> None:
         """Notify the UI. A UI error must never break the scan."""
@@ -52,16 +57,65 @@ class Orchestrator:
             srcs = existing.meta.setdefault("all_sources", [existing.source])
             if f.source not in srcs:
                 srcs.append(f.source)
+            via = existing.meta.setdefault("also_via_username", [])
+            for u in f.meta.get("also_via_username", []):
+                if u not in via:
+                    via.append(u)
+            if not via:
+                del existing.meta["also_via_username"]
             return False
         f.meta.setdefault("all_sources", [f.source])
         self.results[f.key] = f
         return True
 
+    def _is_unrequested_webmail(self, f: Finding) -> bool:
+        """The one place the webmail rule lives: a webmail domain (gmail.com,
+        mail.gmail.com, ...) is dropped, whoever found it, unless the user asked
+        for it (or a parent domain of it) with --domain."""
+        if f.type not in DOMAIN_TYPES or not is_webmail(f.value):
+            return False
+        if any(is_under(f.value, d) for d in self._requested_domains):
+            return False
+        if f.value.lower() not in self._webmail_logged:
+            self._webmail_logged.add(f.value.lower())
+            log.info("Not scanning webmail domain %s (from %s)", f.value,
+                     f.meta.get("derived_from") or f.parent or f.source)
+        return True
+
+    def _attribute_to_email(self, seed: Finding, f: Finding) -> None:
+        """A username derived from an email (bob from bob@acme.io) is only a guess.
+        When it reports a breach the email itself is already in, it is the same
+        exposure: fold it into the email's row instead of adding a second one.
+        A breach only the guessed username is in stays its own row, under 'bob',
+        so the email is never credited with a breach it was not found in."""
+        if not (f.type == "breach" and seed.source == "input:derived" and seed.parent
+                and f.meta.get("account") == seed.value):
+            return
+        email_row = f"breach:{f.value.strip().lower()}#{seed.parent.strip().lower()}"
+        if email_row in self.results:
+            f.meta["account"] = seed.parent
+            f.meta["also_via_username"] = [seed.value]
+
+    def split_seeds(self, seeds: list[Finding]) -> tuple[list[Finding], list[Finding]]:
+        """(seeds that will be scanned, webmail seeds that will be skipped).
+        Same rule as run(); skipped ones are logged here, once."""
+        self._requested_domains = {
+            s.value for s in seeds   # domains the user typed (not derived from an email)
+            if s.type in DOMAIN_TYPES and s.source == "input" and not s.meta.get("derived_from")
+        }
+        kept, skipped = [], []
+        for s in seeds:
+            (skipped if self._is_unrequested_webmail(s) else kept).append(s)
+        return kept, skipped
+
     def run(self, target: Target) -> dict[str, Finding]:
         queue: deque[Finding] = deque()
+        self.split_seeds(target.seeds)
 
         # queue the initial seeds
         for seed in target.seeds:
+            if self._is_unrequested_webmail(seed):
+                continue
             if self._store(seed):
                 queue.append(seed)
 
@@ -71,6 +125,21 @@ class Orchestrator:
             log.warning("Modules not available (graceful degrade): %s", ", ".join(skipped))
         log.info("Active modules: %s", ", ".join(m.name for m in available) or "none")
 
+        try:
+            processed = self._pivot(queue, available)
+        except KeyboardInterrupt:
+            # Ctrl+C: stop pivoting, keep everything found so far
+            self.interrupted = True
+            found = sum(1 for f in self.results.values() if f.source != "input")
+            log.warning("Scan interrupted, keeping %d findings found so far.", found)
+            return self.results
+
+        log.info("Pivot done. processed_seeds=%d total_findings=%d",
+                 processed, len(self.results))
+        return self.results
+
+    def _pivot(self, queue: deque[Finding], available: list[BaseModule]) -> int:
+        """The pivot loop. Returns the number of processed seeds."""
         processed = 0
         while queue:
             if len(self.results) >= self.max_findings:
@@ -94,14 +163,17 @@ class Orchestrator:
                     found = []
 
                 for f in found:
+                    if self._is_unrequested_webmail(f):
+                        continue
+                    self._attribute_to_email(seed, f)
                     self._notify("finding", f)
                     is_new = self._store(f)
                     # edge for the graph (parent seed -> finding)
-                    self.edges.append((seed.node_id, f.node_id))
+                    edge = (seed.node_id, f.node_id)
+                    if edge not in self._edge_set:
+                        self._edge_set.add(edge)
+                        self.edges.append(edge)
                     if is_new and f.depth < self.max_depth:
                         queue.append(f)
             processed += 1
-
-        log.info("Pivot done. processed_seeds=%d total_findings=%d",
-                 processed, len(self.results))
-        return self.results
+        return processed

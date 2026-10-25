@@ -1,11 +1,13 @@
 """
 SpiderfootModule: broad scan of domain/email/ip via the SpiderFoot CLI.
 
-Runs `sf.py -s <target> -o json` (if sf.py is on PATH or in
-SPIDERFOOT_PATH) and parses the JSON. SpiderFoot is heavy, so we set a
-timeout and a limited set of passive modules. Degrades gracefully if missing.
+Runs SpiderFoot's CLI with `-s <target> -o json` and parses the JSON. It is
+found as, in order: sf.py on PATH, SPIDERFOOT_PATH/sf.py, or the `spiderfoot`
+command (the Kali/Debian package's wrapper around sf.py). SpiderFoot is
+heavy, so we set a timeout and a limited set of passive modules, and only
+run it on the user's own inputs. Degrades gracefully if missing.
 
-Output shape (sf.py 4.x, -o json): a JSON array of
+Output shape (SpiderFoot 4.x, -o json): a JSON array of
     {"generated": int, "type": "Internet Name", "data": str, "module": str, "source": str}
 
 WARNING: a full scan can take hours. Here we use passive-only modules and a
@@ -16,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 
 from core.models import EntityType, Finding
@@ -49,11 +52,19 @@ SF_DESCR_TO_CODE = {
 # passive, key-less modules (safe default)
 SF_MODULES = "sfp_dnsresolve,sfp_crt,sfp_email,sfp_names,sfp_social,sfp_whois"
 
+SFURL_RE = re.compile(r"<SFURL>(.*?)</SFURL>", re.S)
+
+
+def clean_sf_data(data: str) -> str:
+    """SpiderFoot wraps URLs: 'Twitter: <SFURL>https://..</SFURL>' -> 'https://..'."""
+    m = SFURL_RE.search(data)
+    return m.group(1).strip() if m else data
+
 
 class SpiderfootModule(BaseModule):
     name = "spiderfoot"
     accepts = {EntityType.DOMAIN, EntityType.EMAIL, EntityType.IP}
-    requires_binary = "sf.py"
+    requires_binary = "spiderfoot"  # informational: available() also accepts sf.py
 
     def _locate(self) -> str | None:
         exe = shutil.which("sf.py")
@@ -64,19 +75,33 @@ class SpiderfootModule(BaseModule):
             cand = os.path.join(base, "sf.py")
             if os.path.exists(cand):
                 return cand
-        return None
+        # Kali/Debian package: /usr/bin/spiderfoot, a wrapper that runs sf.py "$@"
+        return shutil.which("spiderfoot")
+
+    def _command(self) -> list[str] | None:
+        """How to start SpiderFoot: sf.py through python3, the wrapper directly."""
+        sf = self._locate()
+        if not sf:
+            return None
+        return ["python3", sf] if sf.endswith("sf.py") else [sf]
 
     def available(self) -> bool:
         return self._locate() is not None
 
+    def handles(self, seed: Finding) -> bool:
+        # SpiderFoot is the slowest module (up to 600s per target), so it only
+        # runs on the user's own inputs, never on pivoted findings.
+        return seed.depth == 0 and super().handles(seed)
+
     def run(self, seed: Finding) -> list[Finding]:
-        sf = self._locate()
-        if not sf:
-            log.info("[spiderfoot] sf.py missing, skip %s", seed.value)
+        base_cmd = self._command()
+        if not base_cmd:
+            log.info("[spiderfoot] spiderfoot not found (no `spiderfoot` or sf.py on PATH, "
+                     "SPIDERFOOT_PATH not set), skip %s", seed.value)
             return []
 
         cmd = [
-            "python3", sf,
+            *base_cmd,
             "-s", seed.value,
             "-m", SF_MODULES,
             "-o", "json",
@@ -99,6 +124,7 @@ class SpiderfootModule(BaseModule):
             data = row.get("data") if isinstance(row, dict) else None
             if not event_type or not data:
                 continue
+            data = clean_sf_data(str(data))
             event_type = SF_DESCR_TO_CODE.get(event_type, event_type)
             mapped = SF_EVENT_MAP.get(event_type)
             if not mapped:

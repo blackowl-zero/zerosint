@@ -25,6 +25,7 @@ It wraps tools you probably already use: Maigret, theHarvester, recon-ng, Spider
 - Takes any mix of inputs: username, email, domain, IP, phone.
 - Runs the right tool for each one. Username goes to Maigret, domain to theHarvester and recon-ng, email to the breach checks, phone to PhoneInfoga.
 - Pivots. Anything it finds becomes a new input, so an email leads to breaches, a domain leads to subdomains and more emails, and so on, up to a depth you set.
+- An email's domain is scanned too (`me@acme.io` also scans `acme.io`), except for free webmail providers like gmail.com, outlook.com or yahoo.gr. Scanning those tells you nothing about the target. The same applies when a tool finds a webmail domain or subdomain on its own (e.g. SpiderFoot reporting `gmail.com`): it is dropped, not scanned and not reported. If you really want one scanned, pass it with `--domain` (its subdomains are then scanned too).
 - Scores every finding. If two tools agree on something, its confidence goes up. The further a finding sits from your original input, the lower it gets weighted.
 - Writes an HTML report with a findings table and a relationship graph, plus a JSON file and a SQLite database.
 
@@ -35,7 +36,7 @@ It wraps tools you probably already use: Maigret, theHarvester, recon-ng, Spider
 | Maigret | username | maigret installed |
 | theHarvester | domain | theHarvester installed |
 | recon-ng | domain | recon-cli + one marketplace module (see setup) |
-| SpiderFoot | domain, email, ip | sf.py on PATH |
+| SpiderFoot | domain, email, ip (your own inputs only, it's slow) | `spiderfoot` (Kali package) or sf.py on PATH / `SPIDERFOOT_PATH` |
 | XposedOrNot | email | nothing, it's free and keyless |
 | PhoneInfoga | phone | phoneinfoga binary |
 | HIBP | email, username | paid API key, optional |
@@ -65,7 +66,10 @@ pip install maigret theHarvester
 # recon-ng ships with zero modules, install the keyless one this tool uses:
 recon-cli -C "marketplace install recon/domains-hosts/hackertarget"
 
-# SpiderFoot and PhoneInfoga have their own setup, grab them from their repos.
+# SpiderFoot: on Kali the package is enough
+sudo apt install spiderfoot
+
+# PhoneInfoga has its own setup, grab it from its repo.
 ```
 
 On Windows, run everything inside WSL (Kali works fine). recon-ng and SpiderFoot don't behave on native Windows.
@@ -90,18 +94,43 @@ If you prefer flags, or want to script it:
 # username + email
 python main.py --username someuser --email someone@example.com
 
-# a domain, deeper pivot
-python main.py --domain example.com --depth 2
+# a domain, deeper pivot (--depth takes 1-5, default 2)
+python main.py --domain example.com --depth 3
 
 # everything at once
 python main.py --username someuser --email a@b.com --domain b.com --phone "+30 ..."
 
 # check if one of your own passwords has leaked
-# uses k-anonymity, the password never leaves your machine
-python main.py --check-password "mypassword"
+# uses k-anonymity, the password never leaves your machine.
+# It asks for the password at a hidden prompt, so it never lands in your shell history:
+python main.py --check-password
+# or pipe it in from a script:
+printf '%s' "$PW" | python main.py --check-password
 ```
 
-You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run.
+`--check-password "mypassword"` (the old form) is refused with a short explanation, because the password would end up in your shell history and in `ps`. Error messages never repeat what you typed on the command line, so a password typed by mistake (even with a misspelled flag) is not printed back. Ctrl+C at the hidden prompt just cancels (exit 130).
+
+The graph in the report runs in a sandboxed frame (scripts only) and shows a label on every node.
+
+### Benchmark
+
+`benchmarks/run_benchmark.py` measures errors and false positives on a fixed set of targets, to compare two versions of zerosint (run it inside WSL):
+
+```bash
+# run against a checkout (e.g. a git worktree of main), outputs go to a temp dir
+python benchmarks/run_benchmark.py run --repo PATH --usernames user-a user-b --gmail you@gmail.com \
+    --label main --out benchmarks/baseline_main.json
+# list findings, mark each one "mine" / "not_mine" in benchmarks/verdicts.json, then score
+python benchmarks/run_benchmark.py review benchmarks/baseline_main.json --out benchmarks/review.md
+python benchmarks/run_benchmark.py score benchmarks/baseline_main.json --verdicts benchmarks/verdicts.json
+python benchmarks/run_benchmark.py compare benchmarks/baseline_main.json benchmarks/after_fixes.json
+```
+
+Results contain real scan data, so `benchmarks/*.json` and `*.md` are git-ignored.
+
+You get three things out: an HTML report you open in a browser, a JSON dump, and a SQLite db that keeps one scan per run. The HTML report is a single file that works offline, with nothing next to it.
+
+Pressing Ctrl+C during a scan doesn't throw the work away. zerosint stops pivoting, writes the report, JSON and db entry with everything found so far (marked as partial), and exits with code 130. This works from the menu too.
 
 ## Scope
 

@@ -30,6 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPORT = os.path.join(HERE, "zerosint_report.html")
 FINDINGS = os.path.join(HERE, "zerosint_findings.json")
 FIELDS = ["email", "username", "domain", "name", "phone", "ip", "org"]
+FORCE_STOP_PRESSES = 3  # Ctrl+C presses during a scan before the menu stops it
 
 # settings kept while the menu is running
 settings = {"depth": 2, "plain": False}
@@ -92,12 +93,30 @@ def run_scan(inputs: dict[str, str]) -> None:
     if settings["plain"]:
         cmd.append("--plain")
     say("Running: " + " ".join(cmd[1:]), "grey50")
-    try:
-        rc = subprocess.run(cmd, cwd=HERE).returncode
-    except KeyboardInterrupt:
-        say("\nInterrupted.", "yellow")
-        return
-    if rc == 0 and os.path.exists(REPORT) and confirm("Open the HTML report?", False):
+    # Ctrl+C reaches main.py too (same terminal), which then saves a partial
+    # report. Wait for it instead of killing it (subprocess.run would kill it).
+    # A hung scan must not trap the user: the third Ctrl+C stops it for good.
+    proc = subprocess.Popen(cmd, cwd=HERE)
+    presses = 0
+    while True:
+        try:
+            rc = proc.wait()
+            break
+        except KeyboardInterrupt:
+            presses += 1
+            if presses >= FORCE_STOP_PRESSES:
+                say("\nStopping the scan.", "yellow")
+                proc.terminate()
+                try:
+                    rc = proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    rc = proc.wait()
+                break
+            say(f"\nInterrupted, waiting for the partial report... "
+                f"(press Ctrl+C {FORCE_STOP_PRESSES - presses} more time(s) to force stop)",
+                "yellow")
+    if rc in (0, 130) and os.path.exists(REPORT) and confirm("Open the HTML report?", False):
         open_report()
 
 
@@ -184,7 +203,8 @@ def open_report() -> None:
 
 
 def run_tests() -> None:
-    subprocess.run([sys.executable, os.path.join(HERE, "tests", "test_xposed_mod.py")], cwd=HERE)
+    subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests",
+                    "-p", "test_*.py", "-v"], cwd=HERE)
 
 
 def change_settings() -> None:

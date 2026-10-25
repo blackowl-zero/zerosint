@@ -8,7 +8,8 @@ Missing tools are skipped (graceful degrade), so it always runs.
 Usage:
     python main.py --username blackowl-zero --email me@example.com
     python main.py --domain example.com --depth 2 -o report.html
-    python main.py --check-password 'to_diko_mou_password'   # k-anonymity util
+    python main.py --check-password                          # k-anonymity util, hidden prompt
+    printf '%s' "$PW" | python main.py --check-password      # same, password from stdin
     python main.py --email me@example.com --plain            # plain output (pipes/CI)
 
 Authorized / educational use only. Passive recon. No credential testing.
@@ -17,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import getpass
 import logging
+import signal
 import sys
 
 # load .env if python-dotenv is installed (optional)
@@ -44,6 +47,67 @@ from modules.spiderfoot_mod import SpiderfootModule
 from modules.phoneinfoga_mod import PhoneInfogaModule
 
 
+OLD_PW_USAGE = (
+    "--check-password no longer takes the password as an argument "
+    "(it would end up in your shell history).\n"
+    "  Interactive: python main.py --check-password   (hidden prompt)\n"
+    "  Scripted:    printf '%s' \"$PW\" | python main.py --check-password"
+)
+
+
+def _mentions_check_password(argv: list[str]) -> bool:
+    """True if argv uses --check-password, also abbreviated (--check-pass) or as --x=y."""
+    full = "--check-password"
+    for a in argv:
+        flag = a.split("=", 1)[0]
+        if len(flag) > 3 and flag.startswith("--") and full.startswith(flag):
+            return True
+    return False
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse echoes unknown arguments in its errors. With --check-password one of
+    them may be the password, so in that case the error never repeats them."""
+
+    def error(self, message: str):  # noqa: D401 - argparse API
+        if _mentions_check_password(sys.argv[1:]):
+            self.exit(2, f"{self.prog}: error: invalid arguments for --check-password "
+                         "(not shown, they may contain a password).\n" + OLD_PW_USAGE + "\n")
+        # these messages repeat raw argv, which may be a password typed by
+        # mistake (e.g. a misspelled --check-pasword): never echo it
+        if message.startswith("unrecognized arguments") or "ignored explicit argument" in message:
+            message = ("unrecognized or misplaced arguments (not shown, they may contain "
+                       "a password); run with -h for usage")
+        super().error(message)
+
+
+def read_password(stream=None) -> str:
+    """Hidden prompt on a terminal; otherwise one line from stdin (for scripts)."""
+    stream = sys.stdin if stream is None else stream
+    if stream.isatty():
+        return getpass.getpass("Password (hidden): ")
+    line = stream.readline()
+    if line.endswith("\n"):
+        line = line[:-1]
+    if line.endswith("\r"):
+        line = line[:-1]
+    return line
+
+
+@contextlib.contextmanager
+def _sigint_ignored():
+    """Ignore Ctrl+C for the duration of the block (main thread only)."""
+    try:
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:  # not the main thread: nothing to change
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old)
+
+
 def build_modules():
     return [
         MaigretModule(),
@@ -58,7 +122,7 @@ def build_modules():
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="ZeroSint: passive recon aggregator")
+    ap = _Parser(description="ZeroSint: passive recon aggregator")
     ap.add_argument("--name")
     ap.add_argument("--username")
     ap.add_argument("--email")
@@ -66,17 +130,24 @@ def main() -> int:
     ap.add_argument("--domain")
     ap.add_argument("--ip")
     ap.add_argument("--org")
-    ap.add_argument("--depth", type=int, default=2, help="max pivot depth (default 2)")
+    ap.add_argument("--depth", type=int, default=2, choices=range(1, 6), metavar="1-5",
+                    help="max pivot depth 1-5 (default 2)")
     ap.add_argument("-o", "--output", default="zerosint_report.html")
     ap.add_argument("--json", default="zerosint_findings.json")
     ap.add_argument("--db", default="zerosint.db")
     ap.add_argument("--label", default=None, help="friendly name for the report")
-    ap.add_argument("--check-password", metavar="PW",
-                    help="k-anonymity password breach check (standalone util)")
+    ap.add_argument("--check-password", nargs="?", const=True, default=None, metavar="",
+                    help="k-anonymity password breach check: hidden prompt, or "
+                         "the password from stdin when piped")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--plain", action="store_true",
                     help="plain text output, no Rich UI (for pipes, CI, logs)")
     args = ap.parse_args()
+
+    # old usage: --check-password "pw" (the password would sit in shell history)
+    if isinstance(args.check_password, str):
+        print(OLD_PW_USAGE, file=sys.stderr)
+        return 2
 
     # Rich UI by default; None = plain (--plain, not a TTY, or rich is missing)
     ui = ui_console.make_ui(plain=args.plain)
@@ -92,7 +163,17 @@ def main() -> int:
 
     # standalone utility: check your own password with k-anonymity
     if args.check_password:
-        n = check_password_pwned(args.check_password)
+        try:
+            pw = read_password()
+        except KeyboardInterrupt:  # Ctrl+C at the prompt
+            print("\nCancelled.", file=sys.stderr)
+            return 130
+        except EOFError:           # Ctrl+D at the prompt
+            pw = ""
+        if not pw:
+            print("No password given.", file=sys.stderr)
+            return 2
+        n = check_password_pwned(pw)
         if n < 0:
             print("Could not reach pwned-passwords API.")
         elif n == 0:
@@ -112,40 +193,50 @@ def main() -> int:
     label = args.label or next(iter(raw.values()))
     target = Target(label=label)
     target.seeds = normalize(raw)
-    logging.info("Seeds: %s", ", ".join(f"{s.type}={s.value}" for s in target.seeds))
-
-    if ui is not None:
-        ui.header(label, target.seeds)
     orch = Orchestrator(
         build_modules(), max_depth=args.depth,
         progress_callback=ui.on_event if ui is not None else None,
     )
+    # show only what will be scanned (skipped webmail domains are logged by the orchestrator)
+    scanned_seeds, _skipped = orch.split_seeds(target.seeds)
+    logging.info("Seeds: %s", ", ".join(f"{s.type}={s.value}" for s in scanned_seeds))
+
+    if ui is not None:
+        ui.header(label, scanned_seeds)
     with (ui.live_scan() if ui is not None else contextlib.nullcontext()):
         results = orch.run(target)
     results = correlate(results)
     summary = summarize(results)
+    partial = orch.interrupted  # Ctrl+C: save what we have, marked as partial
 
-    # persist
-    store = Storage(args.db)
-    scan_id = store.new_scan(label)
-    store.save(scan_id, results, orch.edges)
-    store.close()
+    # persist + reports. Ctrl+C is ignored while saving, so a second press
+    # cannot cut the files short.
+    with _sigint_ignored():
+        store = Storage(args.db)
+        scan_id = store.new_scan(f"{label} (partial)" if partial else label)
+        store.save(scan_id, results, orch.edges)
+        store.close()
 
-    # reports
-    html_report.export_json(results, args.json)
-    html_report.export_html(results, orch.edges, summary, label, args.output)
+        html_report.export_json(results, args.json)
+        html_report.export_html(results, orch.edges, summary, label, args.output,
+                                interrupted=partial)
+    rc = 130 if partial else 0  # 130 = the usual exit code after Ctrl+C
 
+    shown = False
     if ui is not None:
         try:
             ui.summary(results, summary, label, {
                 "Report": args.output, "JSON": args.json,
                 "DB": f"{args.db} (scan #{scan_id})",
             })
-            return 0
+            shown = True
         except Exception as e:  # noqa: BLE001 - UI error -> plain summary
             logging.warning("Rich summary failed (%s), falling back to plain.", e)
-    _print_plain_summary(label, summary, args, scan_id)
-    return 0
+    if not shown:
+        _print_plain_summary(label, summary, args, scan_id)
+    if partial:
+        print(f"Scan interrupted. Partial report saved: {args.output}")
+    return rc
 
 
 def _print_plain_summary(label: str, summary: dict, args, scan_id) -> None:
