@@ -12,6 +12,8 @@ from __future__ import annotations
 import html
 import json
 import logging
+import re
+from urllib.parse import urlparse
 
 from core.models import EntityType, Finding
 
@@ -33,17 +35,37 @@ def export_json(results: dict[str, Finding], path: str) -> None:
     log.info("JSON written: %s", path)
 
 
+def _safe_href(url: str) -> str | None:
+    """Only http(s) URLs become links; anything else (javascript:, data:...) stays text."""
+    try:
+        scheme = urlparse(str(url).strip()).scheme.lower()
+    except ValueError:
+        return None
+    return url if scheme in ("http", "https") else None
+
+
+# pyvis always adds an HTML comment pointing at ../node_modules and loads
+# Bootstrap from a CDN (only used for a card border). Strip both so the
+# report is one file that works offline.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+_BOOTSTRAP_RE = re.compile(
+    r"<link\b[^>]*bootstrap[^>]*>|<script\b[^>]*bootstrap[^>]*>\s*</script>", re.I | re.S)
+
+
 def _build_graph_html(results: dict[str, Finding],
                       edges: list[tuple[str, str]]) -> str:
+    """Full HTML document for the graph (embedded later in an iframe)."""
     try:
         from pyvis.network import Network
     except ImportError:
         log.info("pyvis not installed, graph fallback to text.")
-        lines = [f"{p} -> {c}" for p, c in edges]
+        names = {f.node_id: f.value for f in results.values()}
+        lines = [f"{names.get(p, p)} -> {names.get(c, c)}" for p, c in edges]
         return "<pre>" + html.escape("\n".join(lines)) + "</pre>"
 
+    # in_line: vis-network JS/CSS go inside the file, no lib/ folder needed
     net = Network(height="600px", width="100%", bgcolor="#0f172a",
-                  font_color="#e2e8f0", directed=True)
+                  font_color="#e2e8f0", directed=True, cdn_resources="in_line")
     net.barnes_hut()
     for f in results.values():
         color = TYPE_COLOR.get(f.type, "#94a3b8")
@@ -55,7 +77,9 @@ def _build_graph_html(results: dict[str, Finding],
         if p in nodes and c in nodes:
             net.add_edge(p, c)
     try:
-        return net.generate_html(notebook=False)
+        doc = net.generate_html(notebook=False)
+        doc = _HTML_COMMENT_RE.sub("", doc)
+        return _BOOTSTRAP_RE.sub("", doc)
     except Exception as e:  # noqa: BLE001
         log.warning("graph gen failed: %s", e)
         return "<p>graph unavailable</p>"
@@ -70,7 +94,7 @@ def _rows(results: dict[str, Finding]) -> str:
     for f in ordered:
         tier = f.meta.get("tier", "low")
         val = html.escape(f.value)
-        if f.type == EntityType.PROFILE_URL:
+        if f.type == EntityType.PROFILE_URL and _safe_href(f.value):
             val = f'<a href="{val}" target="_blank" rel="noopener">{val}</a>'
         extra = ""
         if f.type == EntityType.BREACH:
@@ -117,8 +141,9 @@ def _phone_section(results: dict[str, Finding]) -> str:
             for it in items:
                 url = html.escape(it.get("url", ""))
                 label = html.escape(it.get("dork") or it.get("url", ""))
-                out.append(f'<tr><td>{html.escape(cat)}</td>'
-                           f'<td><a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a></td></tr>')
+                cell = (f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+                        if _safe_href(it.get("url", "")) else label)
+                out.append(f'<tr><td>{html.escape(cat)}</td><td>{cell}</td></tr>')
         out.append("</tbody></table>")
     return "\n".join(out)
 
@@ -126,6 +151,11 @@ def _phone_section(results: dict[str, Finding]) -> str:
 def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
                 summary: dict, target_label: str, path: str) -> None:
     graph_html = _build_graph_html(results, edges)
+    if graph_html.lstrip().lower().startswith("<html"):
+        # pyvis gives a whole document; nest it in an iframe, not in our <body>
+        graph_html = ('<iframe class="graph" title="Relationship graph" '
+                      'style="width:100%;height:620px;border:0;display:block" '
+                      f'srcdoc="{html.escape(graph_html, quote=True)}"></iframe>')
 
     by_type = ", ".join(f"{k}: {v}" for k, v in summary["by_type"].items()) or "none"
     t = summary["by_tier"]
