@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 
 from core.models import EntityType, Finding
@@ -49,6 +50,14 @@ SF_DESCR_TO_CODE = {
 # passive, key-less modules (safe default)
 SF_MODULES = "sfp_dnsresolve,sfp_crt,sfp_email,sfp_names,sfp_social,sfp_whois"
 
+SFURL_RE = re.compile(r"<SFURL>(.*?)</SFURL>", re.S)
+
+
+def clean_sf_data(data: str) -> str:
+    """SpiderFoot wraps URLs: 'Twitter: <SFURL>https://..</SFURL>' -> 'https://..'."""
+    m = SFURL_RE.search(data)
+    return m.group(1).strip() if m else data
+
 
 class SpiderfootModule(BaseModule):
     name = "spiderfoot"
@@ -64,19 +73,32 @@ class SpiderfootModule(BaseModule):
             cand = os.path.join(base, "sf.py")
             if os.path.exists(cand):
                 return cand
-        return None
+        # Kali/Debian package: /usr/bin/spiderfoot, a wrapper that runs sf.py "$@"
+        return shutil.which("spiderfoot")
+
+    def _command(self) -> list[str] | None:
+        """How to start SpiderFoot: sf.py through python3, the wrapper directly."""
+        sf = self._locate()
+        if not sf:
+            return None
+        return ["python3", sf] if sf.endswith("sf.py") else [sf]
 
     def available(self) -> bool:
         return self._locate() is not None
 
+    def handles(self, seed: Finding) -> bool:
+        # SpiderFoot is the slowest module (up to 600s per target), so it only
+        # runs on the user's own inputs, never on pivoted findings.
+        return seed.depth == 0 and super().handles(seed)
+
     def run(self, seed: Finding) -> list[Finding]:
-        sf = self._locate()
-        if not sf:
+        base_cmd = self._command()
+        if not base_cmd:
             log.info("[spiderfoot] sf.py missing, skip %s", seed.value)
             return []
 
         cmd = [
-            "python3", sf,
+            *base_cmd,
             "-s", seed.value,
             "-m", SF_MODULES,
             "-o", "json",
@@ -99,6 +121,7 @@ class SpiderfootModule(BaseModule):
             data = row.get("data") if isinstance(row, dict) else None
             if not event_type or not data:
                 continue
+            data = clean_sf_data(str(data))
             event_type = SF_DESCR_TO_CODE.get(event_type, event_type)
             mapped = SF_EVENT_MAP.get(event_type)
             if not mapped:
