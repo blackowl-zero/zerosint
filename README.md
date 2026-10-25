@@ -1,6 +1,20 @@
-# zerosint
+<p align="center">
+  <img src="https://repository-images.githubusercontent.com/1429660160/2032960f-9c28-442e-8bcc-bd6fb687db1b" alt="zerosint banner" width="100%">
+</p>
 
-A vibe coded OSINT tool that helps you manage your most common OSINT scans.
+<p align="center">
+  <em>A vibe coded OSINT tool that helps you manage your most common OSINT scans.</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.x-00b8d4?style=for-the-badge&logo=python&logoColor=00e5ff&labelColor=0d1117" alt="Python">
+  <img src="https://img.shields.io/badge/OSINT-passive-00b8d4?style=for-the-badge&logo=gnuprivacyguard&logoColor=00e5ff&labelColor=0d1117" alt="Passive OSINT">
+  <img src="https://img.shields.io/badge/platform-linux-00b8d4?style=for-the-badge&logo=linux&logoColor=00e5ff&labelColor=0d1117" alt="Linux">
+</p>
+
+<p align="center">
+  <img src="assets/menu.png" alt="ZeroSint interactive menu" width="720">
+</p>
 
 You give it whatever you've got (a username, an email, a domain, a phone number) and it runs the usual OSINT tools for you, pivots on what it finds, and ties everything into one scored report instead of leaving you with four separate tool outputs to read through.
 
@@ -61,6 +75,20 @@ sudo apt install spiderfoot
 On Windows, run everything inside WSL (Kali works fine). recon-ng and SpiderFoot don't behave on native Windows.
 
 ## Usage
+
+### Interactive menu
+
+The easiest way in. Pick a scan, type your target, and the menu runs everything for you:
+
+```bash
+python menu.py
+```
+
+From there you can run a quick email scan, a full scan, a password check, reopen your last results or the HTML report, change settings (like pivot depth) and run the tests.
+
+### Command line
+
+If you prefer flags, or want to script it:
 
 ```bash
 # username + email
