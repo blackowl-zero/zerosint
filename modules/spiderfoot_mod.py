@@ -1,11 +1,13 @@
 """
 SpiderfootModule: broad scan of domain/email/ip via the SpiderFoot CLI.
 
-Runs `sf.py -s <target> -o json` (if sf.py is on PATH or in
-SPIDERFOOT_PATH) and parses the JSON. SpiderFoot is heavy, so we set a
-timeout and a limited set of passive modules. Degrades gracefully if missing.
+Runs SpiderFoot's CLI with `-s <target> -o json` and parses the JSON. It is
+found as, in order: sf.py on PATH, SPIDERFOOT_PATH/sf.py, or the `spiderfoot`
+command (the Kali/Debian package's wrapper around sf.py). SpiderFoot is
+heavy, so we set a timeout and a limited set of passive modules, and only
+run it on the user's own inputs. Degrades gracefully if missing.
 
-Output shape (sf.py 4.x, -o json): a JSON array of
+Output shape (SpiderFoot 4.x, -o json): a JSON array of
     {"generated": int, "type": "Internet Name", "data": str, "module": str, "source": str}
 
 WARNING: a full scan can take hours. Here we use passive-only modules and a
@@ -62,7 +64,7 @@ def clean_sf_data(data: str) -> str:
 class SpiderfootModule(BaseModule):
     name = "spiderfoot"
     accepts = {EntityType.DOMAIN, EntityType.EMAIL, EntityType.IP}
-    requires_binary = "sf.py"
+    requires_binary = "spiderfoot"  # informational: available() also accepts sf.py
 
     def _locate(self) -> str | None:
         exe = shutil.which("sf.py")
@@ -94,7 +96,8 @@ class SpiderfootModule(BaseModule):
     def run(self, seed: Finding) -> list[Finding]:
         base_cmd = self._command()
         if not base_cmd:
-            log.info("[spiderfoot] sf.py missing, skip %s", seed.value)
+            log.info("[spiderfoot] spiderfoot not found (no `spiderfoot` or sf.py on PATH, "
+                     "SPIDERFOOT_PATH not set), skip %s", seed.value)
             return []
 
         cmd = [

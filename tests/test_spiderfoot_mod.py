@@ -93,6 +93,19 @@ class SpiderfootDegradeTest(unittest.TestCase):
             self.assertFalse(mod.available())
             self.assertEqual(mod.run(Finding(type=EntityType.DOMAIN, value="github.com")), [])
 
+    def test_messages_name_the_kali_binary(self):
+        """Messages and metadata point at what Kali actually installs (`spiderfoot`)."""
+        mod = SpiderfootModule()
+        self.assertEqual(mod.requires_binary, "spiderfoot")
+        with mock.patch("modules.spiderfoot_mod.shutil.which", return_value=None), \
+             mock.patch.dict(os.environ, {"SPIDERFOOT_PATH": ""}), \
+             self.assertLogs("osint", level="INFO") as logs:
+            mod.run(Finding(type=EntityType.DOMAIN, value="github.com"))
+        msg = logs.output[0]
+        self.assertIn("spiderfoot not found", msg)
+        self.assertIn("SPIDERFOOT_PATH", msg)
+        self.assertNotIn("sf.py missing", msg)
+
     def test_found_via_spiderfoot_path(self):
         d = tempfile.mkdtemp()
         open(os.path.join(d, "sf.py"), "w").close()
