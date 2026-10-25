@@ -158,7 +158,13 @@ def main() -> int:
 
     # standalone utility: check your own password with k-anonymity
     if args.check_password:
-        pw = read_password()
+        try:
+            pw = read_password()
+        except KeyboardInterrupt:  # Ctrl+C at the prompt
+            print("\nCancelled.", file=sys.stderr)
+            return 130
+        except EOFError:           # Ctrl+D at the prompt
+            pw = ""
         if not pw:
             print("No password given.", file=sys.stderr)
             return 2
