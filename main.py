@@ -193,14 +193,16 @@ def main() -> int:
     label = args.label or next(iter(raw.values()))
     target = Target(label=label)
     target.seeds = normalize(raw)
-    logging.info("Seeds: %s", ", ".join(f"{s.type}={s.value}" for s in target.seeds))
-
-    if ui is not None:
-        ui.header(label, target.seeds)
     orch = Orchestrator(
         build_modules(), max_depth=args.depth,
         progress_callback=ui.on_event if ui is not None else None,
     )
+    # show only what will be scanned (skipped webmail domains are logged by the orchestrator)
+    scanned_seeds, _skipped = orch.split_seeds(target.seeds)
+    logging.info("Seeds: %s", ", ".join(f"{s.type}={s.value}" for s in scanned_seeds))
+
+    if ui is not None:
+        ui.header(label, scanned_seeds)
     with (ui.live_scan() if ui is not None else contextlib.nullcontext()):
         results = orch.run(target)
     results = correlate(results)

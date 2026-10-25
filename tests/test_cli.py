@@ -44,6 +44,25 @@ class CliTest(unittest.TestCase):
     def test_depth_six_rejected(self):
         self.assertEqual(_main("--username", "x", "--depth", "6", "--plain").returncode, 2)
 
+    def test_seed_list_does_not_show_skipped_webmail_domain(self):
+        """'Seeds:' lists what will be scanned; gmail.com is reported as skipped, once."""
+        import contextlib
+        import io
+        import logging
+        import main
+        with tempfile.TemporaryDirectory() as d:
+            argv = ["main.py", "--email", "x@gmail.com", "--plain", "-o", os.path.join(d, "r.html"),
+                    "--json", os.path.join(d, "f.json"), "--db", os.path.join(d, "s.db")]
+            with mock.patch.object(sys, "argv", argv), \
+                 mock.patch("main.build_modules", return_value=[]), \
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 self.assertLogs(level=logging.INFO) as logs:
+                main.main()
+        seeds = [m for m in logs.output if "Seeds:" in m]
+        self.assertEqual(len(seeds), 1)
+        self.assertNotIn("gmail.com", seeds[0].replace("x@gmail.com", ""))
+        self.assertEqual(len([m for m in logs.output if "webmail domain gmail.com" in m]), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

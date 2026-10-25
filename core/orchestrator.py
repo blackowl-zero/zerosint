@@ -96,13 +96,21 @@ class Orchestrator:
             f.meta["account"] = seed.parent
             f.meta["also_via_username"] = [seed.value]
 
-    def run(self, target: Target) -> dict[str, Finding]:
-        queue: deque[Finding] = deque()
-        # domains the user typed (not derived from an email)
+    def split_seeds(self, seeds: list[Finding]) -> tuple[list[Finding], list[Finding]]:
+        """(seeds that will be scanned, webmail seeds that will be skipped).
+        Same rule as run(); skipped ones are logged here, once."""
         self._requested_domains = {
-            s.value for s in target.seeds
+            s.value for s in seeds   # domains the user typed (not derived from an email)
             if s.type in DOMAIN_TYPES and s.source == "input" and not s.meta.get("derived_from")
         }
+        kept, skipped = [], []
+        for s in seeds:
+            (skipped if self._is_unrequested_webmail(s) else kept).append(s)
+        return kept, skipped
+
+    def run(self, target: Target) -> dict[str, Finding]:
+        queue: deque[Finding] = deque()
+        self.split_seeds(target.seeds)
 
         # queue the initial seeds
         for seed in target.seeds:
