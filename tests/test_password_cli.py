@@ -11,6 +11,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -34,6 +35,38 @@ class PasswordCliTest(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
         self.assertIn("no longer takes the password", p.stderr)
         self.assertNotIn("hunter2", p.stdout + p.stderr)
+
+    def test_password_never_echoed_in_any_argv_form(self):
+        """Whatever way a password ends up on the command line, it is never printed."""
+        secret = "Sup3rS3cretPw"
+        forms = [
+            ["--check-password", "-" + secret],           # looks like a flag
+            ["--check-password=-" + secret],
+            ["--check-pass", "-" + secret],                # argparse abbreviation
+            ["--check-password", "--", "-" + secret],
+            ["--check-password", secret, "--plain"],
+            ["--plain", "--check-password", "-" + secret],
+            ["--check-password", "--plain", secret],
+        ]
+        for argv in forms:
+            with self.subTest(argv=argv):
+                p = subprocess.run([sys.executable, "main.py", *argv], cwd=ROOT,
+                                   capture_output=True, text=True,
+                                   stdin=subprocess.DEVNULL, timeout=60)
+                self.assertEqual(p.returncode, 2)
+                self.assertNotIn(secret, p.stdout + p.stderr)
+
+    def test_piped_password_not_printed_logged_or_saved(self):
+        """Real run against the pwned-passwords API, with -v: the password shows up nowhere."""
+        secret = "Zr0s1nt-bench-Pw"
+        with tempfile.TemporaryDirectory() as d:
+            p = subprocess.run([sys.executable, os.path.join(ROOT, "main.py"),
+                                "--check-password", "--plain", "-v"],
+                               cwd=d, input=secret + "\n", capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertNotIn(secret, p.stdout + p.stderr)
+            self.assertEqual(os.listdir(d), [])  # no report, json or db written
 
     def test_reads_from_pipe(self):
         self.assertEqual(main.read_password(io.StringIO("s3cret\n")), "s3cret")
