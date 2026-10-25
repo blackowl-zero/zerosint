@@ -14,6 +14,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import tempfile
 
 from core.models import EntityType, Finding
@@ -33,6 +34,13 @@ class MaigretModule(BaseModule):
             return []
 
         outdir = tempfile.mkdtemp(prefix="maigret_")
+        try:
+            return self._run_in(seed, outdir)
+        finally:
+            # always clean up, also on timeout or a parse error
+            shutil.rmtree(outdir, ignore_errors=True)
+
+    def _run_in(self, seed: Finding, outdir: str) -> list[Finding]:
         cmd = [
             "maigret", seed.value,
             "--json", "simple",
@@ -45,7 +53,7 @@ class MaigretModule(BaseModule):
             return []
 
         # maigret writes <username>_simple.json to outdir
-        matches = glob.glob(os.path.join(outdir, f"*{seed.value}*.json"))
+        matches = glob.glob(os.path.join(outdir, f"*{glob.escape(seed.value)}*.json"))
         if not matches:
             return []
 
