@@ -178,8 +178,10 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
     banner = ('<div class="banner">Scan interrupted (Ctrl+C): partial results.</div>'
               if interrupted else "")
     if graph_html.lstrip().lower().startswith("<html"):
-        # pyvis gives a whole document; nest it in an iframe, not in our <body>
-        graph_html = ('<iframe class="graph" title="Relationship graph" '
+        # pyvis gives a whole document; nest it in an iframe, not in our <body>.
+        # sandbox: the graph may run its own scripts and nothing else (opaque
+        # origin: no access to the report, no forms, popups or navigation)
+        graph_html = ('<iframe class="graph" title="Relationship graph" sandbox="allow-scripts" '
                       'style="width:100%;height:600px;border:0;display:block" '
                       f'srcdoc="{html.escape(graph_html, quote=True)}"></iframe>')
 
