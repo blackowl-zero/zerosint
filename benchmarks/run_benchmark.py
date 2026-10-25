@@ -15,14 +15,15 @@ zerosint's own outputs (report, JSON, db) go to a temp dir that is deleted
 after each target. Only the results file you name is written.
 
 Usage (inside WSL):
-  python benchmarks/run_benchmark.py run --repo PATH --gmail ADDR --label main \
-      --out benchmarks/baseline_main.json [--python PATH] [--depth 2]
+  python benchmarks/run_benchmark.py run --repo PATH --usernames USER [USER...] \
+      --gmail ADDR --label main --out benchmarks/baseline_main.json [--python PATH] [--depth 2]
   python benchmarks/run_benchmark.py review RESULTS [RESULTS...] --out review.md
   python benchmarks/run_benchmark.py score RESULTS --verdicts benchmarks/verdicts.json
   python benchmarks/run_benchmark.py compare BEFORE AFTER
 
-The results files hold scan data about real people (your own accounts), so
-benchmarks/*.json is git-ignored.
+Targets (usernames, gmail address) are passed on the command line and never
+stored in the code. The results files hold scan data about real people (your
+own accounts), so benchmarks/*.json is git-ignored.
 """
 from __future__ import annotations
 
@@ -36,8 +37,6 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timezone
-
-USERNAMES = ["target-user-a", "target-user-b"]
 
 # Kept here (not imported from zerosint) so old and new code are measured
 # with exactly the same rule.
@@ -264,9 +263,9 @@ def network_check() -> dict:
     return out
 
 
-def targets(gmail: str) -> list[dict]:
+def targets(usernames: list[str], gmail: str) -> list[dict]:
     t = [{"name": f"username:{u}", "args": ["--username", u], "requested_domains": []}
-         for u in USERNAMES]
+         for u in usernames]
     t.append({"name": "email:webmail", "args": ["--email", gmail], "requested_domains": []})
     return t
 
@@ -331,7 +330,7 @@ def cmd_run(a) -> int:
     res = {"label": a.label, "repo": repo, "commit": commit, "depth": a.depth,
            "tools": tools, "started": datetime.now(timezone.utc).isoformat(),
            "network_before": network_check(), "targets": []}
-    for t in targets(a.gmail):
+    for t in targets(a.usernames, a.gmail):
         print(f"[bench] {a.label}: {t['name']} ...", flush=True)
         r = run_target(python, repo, t, a.depth, a.timeout)
         print(f"[bench]   exit={r['exit_code']} {r['duration_s']}s errors={r['errors']['total']} "
@@ -478,6 +477,8 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--repo", required=True, help="zerosint checkout to benchmark")
+    r.add_argument("--usernames", required=True, nargs="+", metavar="USER",
+                   help="usernames to scan (one target each)")
     r.add_argument("--gmail", required=True, help="gmail address for the webmail scenario")
     r.add_argument("--label", required=True)
     r.add_argument("--out", required=True)
