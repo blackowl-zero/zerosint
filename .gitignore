@@ -23,3 +23,6 @@ harvest_*
 benchmarks/*.json
 benchmarks/*.md
 benchmarks/*.index.json
+
+# local image, not part of the repo
+zerosint.jpeg
