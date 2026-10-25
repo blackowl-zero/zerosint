@@ -90,7 +90,8 @@ The graph in the report runs in a sandboxed frame (scripts only) and shows a lab
 
 ```bash
 # run against a checkout (e.g. a git worktree of main), outputs go to a temp dir
-python benchmarks/run_benchmark.py run --repo PATH --gmail you@gmail.com --label main --out benchmarks/baseline_main.json
+python benchmarks/run_benchmark.py run --repo PATH --usernames user-a user-b --gmail you@gmail.com \
+    --label main --out benchmarks/baseline_main.json
 # list findings, mark each one "mine" / "not_mine" in benchmarks/verdicts.json, then score
 python benchmarks/run_benchmark.py review benchmarks/baseline_main.json --out benchmarks/review.md
 python benchmarks/run_benchmark.py score benchmarks/baseline_main.json --verdicts benchmarks/verdicts.json
