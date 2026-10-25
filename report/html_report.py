@@ -153,8 +153,12 @@ def _phone_section(results: dict[str, Finding]) -> str:
 
 
 def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
-                summary: dict, target_label: str, path: str) -> None:
+                summary: dict, target_label: str, path: str,
+                interrupted: bool = False) -> None:
     graph_html = _build_graph_html(results, edges)
+    title_suffix = " (partial)" if interrupted else ""
+    banner = ('<div class="banner">Scan interrupted (Ctrl+C): partial results.</div>'
+              if interrupted else "")
     if graph_html.lstrip().lower().startswith("<html"):
         # pyvis gives a whole document; nest it in an iframe, not in our <body>
         graph_html = ('<iframe class="graph" title="Relationship graph" '
@@ -167,7 +171,7 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
     doc = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ZeroSint Report: {html.escape(target_label)}</title>
+<title>ZeroSint Report: {html.escape(target_label)}{title_suffix}</title>
 <style>
   :root {{ color-scheme: dark; }}
   body {{ margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -192,6 +196,8 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
   a {{ color:#60a5fa; word-break:break-all; }}
   h2 {{ margin-top:36px; font-size:15px; color:#94a3b8;
         border-left:3px solid #3b82f6; padding-left:10px; }}
+  .banner {{ margin:16px 32px 0; padding:12px 16px; border:1px solid #f59e0b;
+             border-radius:8px; color:#fbbf24; background:#1f1405; font-weight:700; }}
   .disclaimer {{ margin-top:40px; padding:14px; border:1px dashed #334155;
                  border-radius:8px; color:#64748b; font-size:12px; }}
 </style></head>
@@ -200,6 +206,7 @@ def export_html(results: dict[str, Finding], edges: list[tuple[str, str]],
   <h1>ZeroSint Report</h1>
   <div class="sub">Target: <b>{html.escape(target_label)}</b> | {summary['total']} findings | passive recon only</div>
 </header>
+{banner}
 <main>
   <div class="cards">
     <div class="card"><div class="n">{summary['total']}</div><div class="l">findings</div></div>
